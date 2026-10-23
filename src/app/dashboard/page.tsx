@@ -9,6 +9,7 @@ import KnowledgeBaseManager from '@/components/KnowledgeBaseManager';
 import LiveChat from '@/components/LiveChat';
 import SubscriptionPlans from '@/components/SubscriptionPlans';
 import { supabase } from '@/lib/supabase';
+import { isDefaultAdmin } from '@/lib/admin';
 import { Loader2 } from 'lucide-react';
 
 export default function DashboardPage() {
@@ -17,6 +18,7 @@ export default function DashboardPage() {
   const [tenant, setTenant] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(false);
 
   useEffect(() => {
     async function initTenant() {
@@ -29,6 +31,7 @@ export default function DashboardPage() {
         let targetTenant: any = null;
 
         if (user) {
+          setIsSuperAdmin(isDefaultAdmin(user.email));
           // Busca tenant do usuário logado
           const { data: userTenant } = await supabase
             .from('xerb_tenants')
@@ -118,6 +121,7 @@ export default function DashboardPage() {
         tenantName={tenant?.name}
         isConnected={isConnected}
         onLogout={handleLogout}
+        isSuperAdmin={isSuperAdmin}
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">

@@ -10,9 +10,17 @@ interface NavbarProps {
   tenantName?: string;
   isConnected?: boolean;
   onLogout?: () => void;
+  isSuperAdmin?: boolean;
 }
 
-export default function Navbar({ currentTab, onTabChange, tenantName, isConnected, onLogout }: NavbarProps) {
+export default function Navbar({
+  currentTab,
+  onTabChange,
+  tenantName,
+  isConnected,
+  onLogout,
+  isSuperAdmin,
+}: NavbarProps) {
   const navItems = [
     { id: 'whatsapp', label: 'Conexão WhatsApp', icon: Bot },
     { id: 'chat', label: 'Live Chat', icon: MessageSquare },
@@ -77,6 +85,17 @@ export default function Navbar({ currentTab, onTabChange, tenantName, isConnecte
                 );
               })}
             </nav>
+
+            {isSuperAdmin && (
+              <Link
+                href="/admin"
+                className="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 transition ml-1"
+                title="Acessar Painel Central do SaaS"
+              >
+                <span>👑</span>
+                <span className="hidden lg:inline">Painel Master</span>
+              </Link>
+            )}
 
             {onLogout && (
               <button
