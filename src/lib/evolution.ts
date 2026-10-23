@@ -12,21 +12,31 @@ export async function getEvolutionConfig(): Promise<EvolutionConfig> {
   if (!apiUrl || !apiKey) {
     try {
       const supabase = getServiceSupabase();
-      const { data: urlRow } = await supabase
-        .from('system_config')
+      let { data: urlRow } = await supabase
+        .from('xerb_system_config')
         .select('value')
         .eq('key', 'evolution_api_url')
-        .single();
-      const { data: keyRow } = await supabase
-        .from('system_config')
+        .maybeSingle();
+      let { data: keyRow } = await supabase
+        .from('xerb_system_config')
         .select('value')
         .eq('key', 'evolution_api_key')
-        .single();
+        .maybeSingle();
+
+      // Fallback para tabela system_config global se necessário
+      if (!urlRow?.value) {
+        const { data: legacyUrl } = await supabase.from('system_config').select('value').eq('key', 'whatsapp_api_url').maybeSingle();
+        urlRow = legacyUrl;
+      }
+      if (!keyRow?.value) {
+        const { data: legacyKey } = await supabase.from('system_config').select('value').eq('key', 'whatsapp_api_key').maybeSingle();
+        keyRow = legacyKey;
+      }
 
       if (urlRow?.value) apiUrl = urlRow.value;
       if (keyRow?.value) apiKey = keyRow.value;
     } catch (err) {
-      console.warn('[Evolution] Erro ao buscar system_config:', err);
+      console.warn('[Evolution] Erro ao buscar configurações:', err);
     }
   }
 

@@ -20,9 +20,9 @@ export default function DashboardPage() {
     async function initTenant() {
       setLoading(true);
       try {
-        // Tenta buscar tenant existente no schema erbots
+        // Tenta buscar tenant existente nas tabelas xerb_
         const { data: existingTenants, error: fetchErr } = await supabase
-          .from('tenants')
+          .from('xerb_tenants')
           .select('*')
           .limit(1);
 
@@ -31,7 +31,7 @@ export default function DashboardPage() {
         } else {
           // Se ainda não houver nenhum tenant (primeira execução), cria o primeiro tenant demo/administrador
           const { data: newTenant, error: createErr } = await supabase
-            .from('tenants')
+            .from('xerb_tenants')
             .insert({
               name: 'Minha Empresa Demo',
               slug: 'empresa-demo',
@@ -45,7 +45,7 @@ export default function DashboardPage() {
           if (newTenant) {
             setTenant(newTenant);
             // Cria configurações padrão do robô para este tenant
-            await supabase.from('bot_settings').insert({
+            await supabase.from('xerb_bot_settings').insert({
               tenant_id: newTenant.id,
               bot_name: 'Sofia da Empresa Demo',
               tone: 'friendly',

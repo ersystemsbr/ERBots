@@ -59,7 +59,7 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
       setLoading(true);
       try {
         const { data, error } = await supabase
-          .from('bot_settings')
+          .from('xerb_bot_settings')
           .select('*')
           .eq('tenant_id', tenantId)
           .maybeSingle();
@@ -130,7 +130,7 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
       };
 
       const { error } = await supabase
-        .from('bot_settings')
+        .from('xerb_bot_settings')
         .upsert(payload, { onConflict: 'tenant_id' });
 
       if (error) throw error;

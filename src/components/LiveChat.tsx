@@ -44,7 +44,7 @@ export default function LiveChat({ tenantId }: LiveChatProps) {
     if (!tenantId) return;
     try {
       const { data, error } = await supabase
-        .from('conversations')
+        .from('xerb_conversations')
         .select('*')
         .eq('tenant_id', tenantId)
         .order('last_message_at', { ascending: false });
@@ -66,7 +66,7 @@ export default function LiveChat({ tenantId }: LiveChatProps) {
     setLoadingMessages(true);
     try {
       const { data, error } = await supabase
-        .from('messages')
+        .from('xerb_messages')
         .select('*')
         .eq('conversation_id', convId)
         .order('created_at', { ascending: true });
@@ -105,7 +105,7 @@ export default function LiveChat({ tenantId }: LiveChatProps) {
     const nextStatus = selectedConv.handling_status === 'AI' ? 'HUMAN' : 'AI';
     try {
       await supabase
-        .from('conversations')
+        .from('xerb_conversations')
         .update({ handling_status: nextStatus })
         .eq('id', selectedConv.id);
 

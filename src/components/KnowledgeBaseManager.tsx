@@ -34,7 +34,7 @@ export default function KnowledgeBaseManager({ tenantId }: KnowledgeBaseManagerP
     setLoading(true);
     try {
       const { data, error } = await supabase
-        .from('knowledge_base')
+        .from('xerb_knowledge_base')
         .select('*')
         .eq('tenant_id', tenantId)
         .order('created_at', { ascending: false });
@@ -70,7 +70,7 @@ export default function KnowledgeBaseManager({ tenantId }: KnowledgeBaseManagerP
   const handleDelete = async (id: string) => {
     if (!confirm('Deseja realmente excluir esta informação da base de conhecimento?')) return;
     try {
-      await supabase.from('knowledge_base').delete().eq('id', id);
+      await supabase.from('xerb_knowledge_base').delete().eq('id', id);
       setItems(items.filter((i) => i.id !== id));
     } catch (err) {
       alert('Erro ao excluir item.');
@@ -81,7 +81,7 @@ export default function KnowledgeBaseManager({ tenantId }: KnowledgeBaseManagerP
     try {
       const nextState = !item.is_active;
       await supabase
-        .from('knowledge_base')
+        .from('xerb_knowledge_base')
         .update({ is_active: nextState })
         .eq('id', item.id);
 
@@ -99,7 +99,7 @@ export default function KnowledgeBaseManager({ tenantId }: KnowledgeBaseManagerP
     try {
       if (editingId) {
         const { error } = await supabase
-          .from('knowledge_base')
+          .from('xerb_knowledge_base')
           .update({
             category,
             title,
@@ -110,7 +110,7 @@ export default function KnowledgeBaseManager({ tenantId }: KnowledgeBaseManagerP
 
         if (error) throw error;
       } else {
-        const { error } = await supabase.from('knowledge_base').insert({
+        const { error } = await supabase.from('xerb_knowledge_base').insert({
           tenant_id: tenantId,
           category,
           title,
@@ -158,7 +158,7 @@ export default function KnowledgeBaseManager({ tenantId }: KnowledgeBaseManagerP
         },
       ];
 
-      await supabase.from('knowledge_base').insert(defaultData);
+      await supabase.from('xerb_knowledge_base').insert(defaultData);
       fetchItems();
     } catch (err) {
       alert('Erro ao carregar exemplos.');

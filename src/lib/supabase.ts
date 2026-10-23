@@ -3,11 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://byshrvdanwgjdipogoxm.supabase.co';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
-// Cliente público para uso no navegador com schema 'erbots' por padrão
+// Cliente público para uso no navegador (schema public com tabelas prefixadas xerb_*)
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  db: {
-    schema: 'erbots',
-  },
   auth: {
     persistSession: true,
     autoRefreshToken: true,
@@ -18,9 +15,6 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 export function getServiceSupabase() {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey;
   return createClient(supabaseUrl, serviceKey, {
-    db: {
-      schema: 'erbots',
-    },
     auth: {
       persistSession: false,
       autoRefreshToken: false,

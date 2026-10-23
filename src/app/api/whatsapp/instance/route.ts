@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
 
     // 1. Busca dados do tenant
     const { data: tenant, error: tenantErr } = await supabase
-      .from('tenants')
+      .from('xerb_tenants')
       .select('id, name, slug')
       .eq('id', tenant_id)
       .single();
@@ -36,9 +36,9 @@ export async function POST(req: NextRequest) {
     if (action === 'CONNECT' || action === 'STATUS') {
       const instanceState = await createOrGetInstance(instanceName, webhookUrl);
 
-      // Atualiza ou insere na tabela erbots.instances
+      // Atualiza ou insere na tabela xerb_instances
       await supabase
-        .from('instances')
+        .from('xerb_instances')
         .upsert(
           {
             tenant_id: tenant.id,
@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
       await logoutInstance(instanceName);
 
       await supabase
-        .from('instances')
+        .from('xerb_instances')
         .update({
           status: 'DISCONNECTED',
           phone_connected: null,

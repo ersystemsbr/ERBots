@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
 
     // 1. Busca a conversa
     const { data: conv, error: convErr } = await supabase
-      .from('conversations')
+      .from('xerb_conversations')
       .select('id, remote_jid, tenant_id')
       .eq('id', conversation_id)
       .eq('tenant_id', tenant_id)
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
 
     // 2. Busca a instância ativa do tenant
     const { data: inst, error: instErr } = await supabase
-      .from('instances')
+      .from('xerb_instances')
       .select('instance_name, status')
       .eq('tenant_id', tenant_id)
       .maybeSingle();
@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 4. Salva no histórico de mensagens
-    await supabase.from('messages').insert({
+    await supabase.from('xerb_messages').insert({
       conversation_id: conv.id,
       tenant_id: tenant_id,
       sender: 'human',
@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
 
     // 5. Atualiza a conversa (mantém como HUMAN)
     await supabase
-      .from('conversations')
+      .from('xerb_conversations')
       .update({
         handling_status: 'HUMAN',
         last_message: text.trim(),

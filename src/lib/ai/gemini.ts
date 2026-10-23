@@ -53,18 +53,17 @@ export async function getGeminiApiKey(): Promise<string> {
 
   try {
     const supabase = getServiceSupabase();
-    // Tenta no schema erbots
+    // Tenta na tabela xerb_system_config
     const { data: erKey } = await supabase
-      .from('system_config')
+      .from('xerb_system_config')
       .select('value')
       .eq('key', 'gemini_api_key')
       .maybeSingle();
 
     if (erKey?.value) return erKey.value;
 
-    // Fallback: busca no schema public se já existia do GastroSys
+    // Fallback: busca na tabela system_config global se já existia do GastroSys
     const { data: pubKey } = await supabase
-      .schema('public' as any)
       .from('system_config')
       .select('value')
       .eq('key', 'gemini_api_key')

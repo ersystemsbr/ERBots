@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
       const mappedStatus = statusMap[state] || 'DISCONNECTED';
 
       await supabase
-        .from('instances')
+        .from('xerb_instances')
         .update({
           status: mappedStatus,
           last_connected_at: mappedStatus === 'CONNECTED' ? new Date().toISOString() : undefined,
@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
 
     // 3. Localiza a instância e o Tenant correspondente
     const { data: instanceRow } = await supabase
-      .from('instances')
+      .from('xerb_instances')
       .select('id, tenant_id, instance_name, status')
       .eq('instance_name', instanceName)
       .maybeSingle();
@@ -86,9 +86,9 @@ export async function POST(req: NextRequest) {
 
     // Busca dados do tenant, bot_settings e knowledge_base
     const [tenantRes, botSettingsRes, kbRes] = await Promise.all([
-      supabase.from('tenants').select('id, name, segment').eq('id', tenantId).single(),
-      supabase.from('bot_settings').select('*').eq('tenant_id', tenantId).maybeSingle(),
-      supabase.from('knowledge_base').select('category, title, content').eq('tenant_id', tenantId).eq('is_active', true),
+      supabase.from('xerb_tenants').select('id, name, segment').eq('id', tenantId).single(),
+      supabase.from('xerb_bot_settings').select('*').eq('tenant_id', tenantId).maybeSingle(),
+      supabase.from('xerb_knowledge_base').select('category, title, content').eq('tenant_id', tenantId).eq('is_active', true),
     ]);
 
     const tenant = tenantRes.data;
@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
     // 4. Cria ou recupera a Conversa no banco
     const cleanPhone = remoteJid.replace(/@s\.whatsapp\.net$/, '').replace(/:\d+$/, '').replace(/\D/g, '');
     let { data: conversation } = await supabase
-      .from('conversations')
+      .from('xerb_conversations')
       .select('*')
       .eq('tenant_id', tenantId)
       .eq('remote_jid', remoteJid)
@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
 
     if (!conversation) {
       const { data: newConv, error: convErr } = await supabase
-        .from('conversations')
+        .from('xerb_conversations')
         .insert({
           tenant_id: tenantId,
           remote_jid: remoteJid,
@@ -135,7 +135,7 @@ export async function POST(req: NextRequest) {
       conversation = newConv;
     } else {
       await supabase
-        .from('conversations')
+        .from('xerb_conversations')
         .update({
           contact_name: pushName || conversation.contact_name,
           last_message: userText,
@@ -151,7 +151,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 5. Salva a mensagem recebida do usuário no histórico
-    await supabase.from('messages').insert({
+    await supabase.from('xerb_messages').insert({
       conversation_id: conversation.id,
       tenant_id: tenantId,
       sender: 'user',
@@ -165,7 +165,7 @@ export async function POST(req: NextRequest) {
 
     // 7. Busca histórico recente de mensagens desta conversa
     const { data: rawMessages } = await supabase
-      .from('messages')
+      .from('xerb_messages')
       .select('sender, content')
       .eq('conversation_id', conversation.id)
       .order('created_at', { ascending: true })
@@ -191,7 +191,7 @@ export async function POST(req: NextRequest) {
       await sendTextMessage(instanceName, remoteJid, aiResult.reply);
 
       // Salva a resposta da IA no banco
-      await supabase.from('messages').insert({
+      await supabase.from('xerb_messages').insert({
         conversation_id: conversation.id,
         tenant_id: tenantId,
         sender: 'ai',
@@ -201,7 +201,7 @@ export async function POST(req: NextRequest) {
       // Atualiza o status da conversa
       const newStatus = aiResult.triggerHandoff ? 'HUMAN' : 'AI';
       await supabase
-        .from('conversations')
+        .from('xerb_conversations')
         .update({
           handling_status: newStatus,
           last_message: aiResult.reply,
