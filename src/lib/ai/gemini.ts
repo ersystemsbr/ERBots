@@ -47,22 +47,10 @@ export interface AIResponse {
  * Busca chave do Gemini nas variáveis de ambiente ou na tabela system_config
  */
 export async function getGeminiApiKey(): Promise<string> {
-  if (process.env.GEMINI_API_KEY) {
-    return process.env.GEMINI_API_KEY;
-  }
-
   try {
     const supabase = getServiceSupabase();
-    // Tenta na tabela xerb_system_config
-    const { data: erKey } = await supabase
-      .from('xerb_system_config')
-      .select('value')
-      .eq('key', 'gemini_api_key')
-      .maybeSingle();
 
-    if (erKey?.value) return erKey.value;
-
-    // Fallback: busca na tabela system_config global se já existia do GastroSys
+    // 1. Prioridade: busca na tabela system_config global (onde já está configurada)
     const { data: pubKey } = await supabase
       .from('system_config')
       .select('value')
@@ -70,11 +58,21 @@ export async function getGeminiApiKey(): Promise<string> {
       .maybeSingle();
 
     if (pubKey?.value) return pubKey.value;
+
+    // 2. Busca na tabela xerb_system_config
+    const { data: erKey } = await supabase
+      .from('xerb_system_config')
+      .select('value')
+      .eq('key', 'gemini_api_key')
+      .maybeSingle();
+
+    if (erKey?.value) return erKey.value;
   } catch (err) {
     console.warn('[Gemini] Erro ao recuperar chave de system_config:', err);
   }
 
-  return '';
+  // 3. Fallback para variável de ambiente
+  return process.env.GEMINI_API_KEY || '';
 }
 
 /**

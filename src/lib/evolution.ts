@@ -6,39 +6,52 @@ export interface EvolutionConfig {
 }
 
 export async function getEvolutionConfig(): Promise<EvolutionConfig> {
-  let apiUrl = process.env.EVOLUTION_API_URL || '';
-  let apiKey = process.env.EVOLUTION_API_KEY || '';
+  let apiUrl = '';
+  let apiKey = '';
 
-  if (!apiUrl || !apiKey) {
-    try {
-      const supabase = getServiceSupabase();
-      let { data: urlRow } = await supabase
+  try {
+    const supabase = getServiceSupabase();
+
+    // 1. Prioridade Máxima: busca direto em system_config (onde o tunnel_manager.py do Linux atualiza dinamicamente se o servidor reiniciar)
+    const { data: dynUrl } = await supabase
+      .from('system_config')
+      .select('value')
+      .eq('key', 'whatsapp_api_url')
+      .maybeSingle();
+
+    const { data: dynKey } = await supabase
+      .from('system_config')
+      .select('value')
+      .eq('key', 'whatsapp_api_key')
+      .maybeSingle();
+
+    if (dynUrl?.value) apiUrl = dynUrl.value;
+    if (dynKey?.value) apiKey = dynKey.value;
+
+    // 2. Busca em xerb_system_config se não tiver encontrado
+    if (!apiUrl) {
+      const { data: xerbUrl } = await supabase
         .from('xerb_system_config')
         .select('value')
         .eq('key', 'evolution_api_url')
         .maybeSingle();
-      let { data: keyRow } = await supabase
+      if (xerbUrl?.value) apiUrl = xerbUrl.value;
+    }
+    if (!apiKey) {
+      const { data: xerbKey } = await supabase
         .from('xerb_system_config')
         .select('value')
         .eq('key', 'evolution_api_key')
         .maybeSingle();
-
-      // Fallback para tabela system_config global se necessário
-      if (!urlRow?.value) {
-        const { data: legacyUrl } = await supabase.from('system_config').select('value').eq('key', 'whatsapp_api_url').maybeSingle();
-        urlRow = legacyUrl;
-      }
-      if (!keyRow?.value) {
-        const { data: legacyKey } = await supabase.from('system_config').select('value').eq('key', 'whatsapp_api_key').maybeSingle();
-        keyRow = legacyKey;
-      }
-
-      if (urlRow?.value) apiUrl = urlRow.value;
-      if (keyRow?.value) apiKey = keyRow.value;
-    } catch (err) {
-      console.warn('[Evolution] Erro ao buscar configurações:', err);
+      if (xerbKey?.value) apiKey = xerbKey.value;
     }
+  } catch (err) {
+    console.warn('[Evolution] Erro ao buscar configurações no Supabase:', err);
   }
+
+  // 3. Fallback final para variáveis de ambiente (se existirem)
+  if (!apiUrl) apiUrl = process.env.EVOLUTION_API_URL || '';
+  if (!apiKey) apiKey = process.env.EVOLUTION_API_KEY || '';
 
   apiUrl = apiUrl.replace(/\/+$/, '');
   return { apiUrl, apiKey };
