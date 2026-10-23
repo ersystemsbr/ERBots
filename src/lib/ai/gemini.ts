@@ -241,8 +241,20 @@ ${kbString}
     parts: [{ text: incomingMessage }],
   });
 
-  const preferredModel = botSettings.gemini_model || 'gemini-3.5-flash';
-  const modelsToTry = Array.from(new Set([preferredModel, 'gemini-3.5-flash', 'gemini-3.7-flash', 'gemini-3.8-flash', 'gemini-flash-latest']));
+  const preferredModel = botSettings.gemini_model || 'gemini-3.6-flash';
+  const FALLBACK_MODELS = [
+    'gemini-3.6-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-3-flash-preview',
+    'gemini-flash-lite-latest',
+    'gemini-3.5-flash',
+    'gemini-3.7-flash',
+    'gemini-3.8-flash',
+    'gemini-flash-latest',
+  ];
+  const modelsToTry = Array.from(new Set([preferredModel, ...FALLBACK_MODELS]));
+  let geminiError: any = null;
 
   for (const model of modelsToTry) {
     try {
@@ -257,18 +269,37 @@ ${kbString}
 
       const replyText = response.text?.trim() || '';
       if (replyText) {
+        // Se precisou mudar de modelo por cota/limite, salva o modelo ativo no banco
+        // para que as próximas mensagens já comecem direto nele sem gastar tentativas
+        if (model !== botSettings.gemini_model && tenant.id) {
+          (async () => {
+            try {
+              const supabase = getServiceSupabase();
+              await supabase
+                .from('xerb_bot_settings')
+                .update({ gemini_model: model, updated_at: new Date().toISOString() })
+                .eq('tenant_id', tenant.id);
+              console.log(`[Gemini] Modelo padrão do tenant ${tenant.name} atualizado automaticamente para: ${model}`);
+            } catch (upErr: any) {
+              console.warn('[Gemini] Erro ao persistir novo modelo:', upErr?.message);
+            }
+          })();
+        }
+
         return {
           reply: replyText,
           triggerHandoff: false,
         };
       }
     } catch (err: any) {
-      console.warn(`[Gemini] Erro no modelo ${model}:`, err?.message || err);
+      console.warn(`[Gemini] Falha no modelo ${model} (${err?.status || 'erro'}). Alternando para o próximo modelo...`);
+      geminiError = err;
     }
   }
 
+  console.error('[Gemini] Todos os modelos da lista atingiram limite de cota ou falharam:', geminiError?.message || geminiError);
   return {
-    reply: 'Obrigado pela mensagem! Entendi sua solicitação e já estou notificando nossa equipe para te responder.',
-    triggerHandoff: true,
+    reply: 'Olá! Nosso atendente virtual está temporariamente com alta demanda de mensagens, mas já registrei seu contato e nossa equipe responderá em instantes! 😊',
+    triggerHandoff: false,
   };
 }
