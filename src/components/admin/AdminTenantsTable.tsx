@@ -58,6 +58,11 @@ export default function AdminTenantsTable({
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editSegment, setEditSegment] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editSlug, setEditSlug] = useState('');
   const [newPlan, setNewPlan] = useState('');
   const [newStatus, setNewStatus] = useState('');
   const [saving, setSaving] = useState(false);
@@ -76,6 +81,11 @@ export default function AdminTenantsTable({
 
   const handleOpenEdit = (tenant: Tenant) => {
     setEditingTenant(tenant);
+    setEditName(tenant.name || '');
+    setEditSegment(tenant.segment || 'Geral');
+    setEditPhone(tenant.phone || '');
+    setEditEmail(tenant.email || '');
+    setEditSlug(tenant.slug || '');
     setNewPlan(tenant.plan || 'trial');
     setNewStatus(tenant.subscription_status || 'trialing');
   };
@@ -92,6 +102,11 @@ export default function AdminTenantsTable({
         },
         body: JSON.stringify({
           tenant_id: editingTenant.id,
+          name: editName.trim(),
+          segment: editSegment.trim(),
+          phone: editPhone.trim(),
+          email: editEmail.trim().toLowerCase(),
+          slug: editSlug.trim().toLowerCase(),
           plan: newPlan,
           subscription_status: newStatus,
         }),
@@ -339,48 +354,128 @@ export default function AdminTenantsTable({
         </div>
       </div>
 
-      {/* Modal de Edição de Plano e Status */}
+      {/* Modal de Edição Completa dos Dados do Cliente */}
       {editingTenant && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
-            <h3 className="text-lg font-bold text-white flex items-center gap-2">
-              <Edit className="w-5 h-5 text-emerald-400" />
-              Editar Assinatura: {editingTenant.name}
-            </h3>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1">
-                Plano do Cliente:
-              </label>
-              <select
-                value={newPlan}
-                onChange={(e) => setNewPlan(e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
-              >
-                <option value="trial">Trial (Teste Grátis)</option>
-                <option value="start">Plano Start (R$ 97/mês)</option>
-                <option value="pro">Plano Pro (R$ 197/mês)</option>
-                <option value="business">Plano Business (R$ 397/mês)</option>
-              </select>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-4 my-8">
+            <div className="border-b border-slate-800 pb-3">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <Edit className="w-5 h-5 text-emerald-400" />
+                Editar Cadastro & Plano: {editingTenant.name}
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Altere os dados cadastrais da empresa ou atualize o plano/status da assinatura.
+              </p>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1">
-                Status da Assinatura:
-              </label>
-              <select
-                value={newStatus}
-                onChange={(e) => setNewStatus(e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
-              >
-                <option value="active">Ativo (Liberado)</option>
-                <option value="trialing">Em Teste (Trial)</option>
-                <option value="past_due">Atrasado / Pendente</option>
-                <option value="canceled">Cancelado / Bloqueado</option>
-              </select>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              {/* Nome da Empresa */}
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-semibold text-slate-400 mb-1">
+                  Nome da Empresa / Cliente: *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
+                  placeholder="Nome da empresa"
+                />
+              </div>
+
+              {/* Segmento */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">
+                  Segmento de Atuação:
+                </label>
+                <input
+                  type="text"
+                  value={editSegment}
+                  onChange={(e) => setEditSegment(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
+                  placeholder="Ex: Comércio, Software..."
+                />
+              </div>
+
+              {/* Telefone */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">
+                  Telefone / WhatsApp:
+                </label>
+                <input
+                  type="text"
+                  value={editPhone}
+                  onChange={(e) => setEditPhone(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
+                  placeholder="(11) 99999-9999"
+                />
+              </div>
+
+              {/* E-mail */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">
+                  E-mail do Cliente:
+                </label>
+                <input
+                  type="email"
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
+                  placeholder="cliente@email.com"
+                />
+              </div>
+
+              {/* Slug */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">
+                  Identificador (Slug):
+                </label>
+                <input
+                  type="text"
+                  value={editSlug}
+                  onChange={(e) => setEditSlug(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''))}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
+                  placeholder="minha-empresa"
+                />
+              </div>
+
+              {/* Plano */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">
+                  Plano do Cliente:
+                </label>
+                <select
+                  value={newPlan}
+                  onChange={(e) => setNewPlan(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="trial">Trial (Teste Grátis)</option>
+                  <option value="start">Plano Start (R$ 97/mês)</option>
+                  <option value="pro">Plano Pro (R$ 197/mês)</option>
+                  <option value="business">Plano Business (R$ 397/mês)</option>
+                </select>
+              </div>
+
+              {/* Status */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">
+                  Status da Assinatura:
+                </label>
+                <select
+                  value={newStatus}
+                  onChange={(e) => setNewStatus(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="active">Ativo (Liberado)</option>
+                  <option value="trialing">Em Teste (Trial)</option>
+                  <option value="past_due">Atrasado / Pendente</option>
+                  <option value="canceled">Cancelado / Bloqueado</option>
+                </select>
+              </div>
             </div>
 
-            <div className="flex items-center justify-end gap-3 pt-3">
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
               <button
                 type="button"
                 onClick={() => setEditingTenant(null)}
@@ -391,7 +486,7 @@ export default function AdminTenantsTable({
               <button
                 type="button"
                 onClick={handleSaveEdit}
-                disabled={saving}
+                disabled={saving || !editName.trim()}
                 className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-sm font-bold rounded-xl transition disabled:opacity-50"
               >
                 {saving ? 'Salvando...' : 'Salvar Alterações'}

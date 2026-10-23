@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { Bot, MessageSquare, Settings, BookOpen, ShieldCheck, LogOut } from 'lucide-react';
+import { Bot, MessageSquare, Settings, BookOpen, ShieldCheck, LogOut, Building2 } from 'lucide-react';
 
 interface NavbarProps {
   currentTab: string;
@@ -27,6 +27,7 @@ export default function Navbar({
     { id: 'bot-settings', label: 'Personalizar IA', icon: Settings },
     { id: 'knowledge', label: 'Base de Conhecimento', icon: BookOpen },
     { id: 'plans', label: 'Planos & Assinatura', icon: ShieldCheck },
+    { id: 'profile', label: 'Dados da Empresa', icon: Building2 },
   ];
 
   return (

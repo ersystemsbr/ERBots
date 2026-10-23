@@ -83,7 +83,18 @@ export async function PATCH(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { tenant_id, plan, subscription_status, extend_trial_days, trial_ends_at } = body;
+    const {
+      tenant_id,
+      name,
+      segment,
+      phone,
+      email,
+      slug,
+      plan,
+      subscription_status,
+      extend_trial_days,
+      trial_ends_at,
+    } = body;
 
     if (!tenant_id) {
       return NextResponse.json({ error: 'tenant_id é obrigatório.' }, { status: 400 });
@@ -93,6 +104,12 @@ export async function PATCH(req: NextRequest) {
     const updatePayload: Record<string, any> = {
       updated_at: new Date().toISOString(),
     };
+
+    if (name !== undefined) updatePayload.name = String(name).trim();
+    if (segment !== undefined) updatePayload.segment = String(segment).trim();
+    if (phone !== undefined) updatePayload.phone = String(phone).trim() || null;
+    if (email !== undefined) updatePayload.email = String(email).trim().toLowerCase() || null;
+    if (slug !== undefined) updatePayload.slug = String(slug).trim().toLowerCase();
 
     if (plan) updatePayload.plan = plan;
     if (subscription_status) updatePayload.subscription_status = subscription_status;

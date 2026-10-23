@@ -8,6 +8,7 @@ import BotSettingsForm from '@/components/BotSettingsForm';
 import KnowledgeBaseManager from '@/components/KnowledgeBaseManager';
 import LiveChat from '@/components/LiveChat';
 import SubscriptionPlans from '@/components/SubscriptionPlans';
+import UserProfileManager from '@/components/UserProfileManager';
 import { supabase } from '@/lib/supabase';
 import { isDefaultAdmin } from '@/lib/admin';
 import { Loader2 } from 'lucide-react';
@@ -176,6 +177,14 @@ export default function DashboardPage() {
           <SubscriptionPlans
             currentPlan={tenant?.plan}
             trialEndsAt={tenant?.trial_ends_at}
+          />
+        )}
+
+        {currentTab === 'profile' && (
+          <UserProfileManager
+            tenant={tenant}
+            onTenantUpdated={setTenant}
+            onNavigateToPlans={() => setCurrentTab('plans')}
           />
         )}
       </main>
