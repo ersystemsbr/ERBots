@@ -85,7 +85,7 @@ export default function WhatsAppConnector({ tenantId, tenantSlug, onStatusChange
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tenant_id: tenantId,
-          conversation_id: 'test',
+          to_phone: testPhone,
           text: testMessage,
         }),
       });

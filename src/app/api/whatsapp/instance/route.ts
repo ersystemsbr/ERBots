@@ -29,8 +29,14 @@ export async function POST(req: NextRequest) {
 
     // Determina a URL do webhook
     const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || 'localhost:3000';
-    const proto = req.headers.get('x-forwarded-proto') || 'http';
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `${proto}://${host}`;
+    const proto = req.headers.get('x-forwarded-proto') || 'https';
+    let baseUrl = process.env.NEXT_PUBLIC_APP_URL || `${proto}://${host}`;
+
+    // Se estiver em localhost ou em erbots.com.br (que está em propagação no Registro.br),
+    // força o uso do domínio https://erbots.vercel.app para que a Evolution API nunca falhe com ENOTFOUND
+    if (!baseUrl || baseUrl.includes('localhost') || baseUrl.includes('erbots.com.br')) {
+      baseUrl = 'https://erbots.vercel.app';
+    }
     const webhookUrl = `${baseUrl.replace(/\/+$/, '')}/api/webhook/whatsapp`;
 
     if (action === 'CONNECT' || action === 'STATUS') {
