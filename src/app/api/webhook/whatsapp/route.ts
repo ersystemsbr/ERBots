@@ -3,6 +3,8 @@ import { getServiceSupabase } from '@/lib/supabase';
 import { sendTextMessage } from '@/lib/evolution';
 import { processAIMessage } from '@/lib/ai/gemini';
 
+export const maxDuration = 60;
+
 function extractText(messageObj: any): string {
   if (!messageObj) return '';
   if (messageObj.conversation) return messageObj.conversation;
