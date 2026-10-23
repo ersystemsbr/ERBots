@@ -19,13 +19,13 @@ export default function HomePage() {
 
           <div className="flex items-center space-x-4">
             <Link
-              href="/dashboard"
+              href="/login"
               className="text-sm font-semibold text-slate-300 hover:text-white transition hidden sm:inline"
             >
               Entrar
             </Link>
             <Link
-              href="/dashboard"
+              href="/cadastro"
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold text-sm shadow-lg shadow-emerald-500/20 transition"
             >
               Testar Grátis por 7 Dias
@@ -60,11 +60,11 @@ export default function HomePage() {
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
             <Link
-              href="/dashboard"
+              href="/cadastro"
               className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-base shadow-xl shadow-emerald-500/25 transition"
             >
               <Zap className="w-5 h-5 fill-current" />
-              Acessar Painel do ERBots
+              Criar Atendente Virtual Grátis
             </Link>
             <a
               href="#recursos"
@@ -186,7 +186,7 @@ export default function HomePage() {
           </p>
           <div>
             <Link
-              href="/dashboard"
+              href="/cadastro"
               className="inline-flex items-center gap-2 px-8 py-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-base rounded-xl shadow-xl shadow-emerald-500/25 transition"
             >
               Criar Atendente Virtual Agora

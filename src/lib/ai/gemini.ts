@@ -241,8 +241,8 @@ ${kbString}
     parts: [{ text: incomingMessage }],
   });
 
-  const preferredModel = botSettings.gemini_model || 'gemini-1.5-flash';
-  const modelsToTry = [preferredModel, 'gemini-2.0-flash', 'gemini-1.5-flash-8b'];
+  const preferredModel = botSettings.gemini_model || 'gemini-3.8-flash';
+  const modelsToTry = Array.from(new Set([preferredModel, 'gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.5-flash', 'gemini-flash-lite-latest']));
 
   for (const model of modelsToTry) {
     try {

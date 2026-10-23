@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS public.xerb_bot_settings (
     human_handoff_enabled BOOLEAN DEFAULT true,
     human_handoff_keywords TEXT[] DEFAULT ARRAY['atendente', 'humano', 'falar com atendente', 'pessoa', 'suporte'],
     human_handoff_message TEXT DEFAULT 'Com certeza! Estou transferindo seu atendimento para nossa equipe humana. Aguarde um instante que já vamos te responder.',
-    gemini_model TEXT DEFAULT 'gemini-1.5-flash',
+    gemini_model TEXT DEFAULT 'gemini-3.8-flash',
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()

@@ -9,9 +9,10 @@ interface NavbarProps {
   onTabChange: (tab: string) => void;
   tenantName?: string;
   isConnected?: boolean;
+  onLogout?: () => void;
 }
 
-export default function Navbar({ currentTab, onTabChange, tenantName, isConnected }: NavbarProps) {
+export default function Navbar({ currentTab, onTabChange, tenantName, isConnected, onLogout }: NavbarProps) {
   const navItems = [
     { id: 'whatsapp', label: 'Conexão WhatsApp', icon: Bot },
     { id: 'chat', label: 'Live Chat', icon: MessageSquare },
@@ -55,26 +56,38 @@ export default function Navbar({ currentTab, onTabChange, tenantName, isConnecte
           </div>
 
           {/* Navegação */}
-          <nav className="flex space-x-1 sm:space-x-2 overflow-x-auto py-2">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = currentTab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => onTabChange(item.id)}
-                  className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-                    isActive
-                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                  }`}
-                >
-                  <Icon className="w-4 h-4" />
-                  <span className="hidden md:inline">{item.label}</span>
-                </button>
-              );
-            })}
-          </nav>
+          <div className="flex items-center space-x-2">
+            <nav className="flex space-x-1 sm:space-x-2 overflow-x-auto py-2">
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = currentTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => onTabChange(item.id)}
+                    className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+                      isActive
+                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                    }`}
+                  >
+                    <Icon className="w-4 h-4" />
+                    <span className="hidden md:inline">{item.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+
+            {onLogout && (
+              <button
+                onClick={onLogout}
+                className="p-2 text-slate-400 hover:text-rose-400 rounded-lg hover:bg-slate-800/60 transition ml-2"
+                title="Sair do painel"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </header>
