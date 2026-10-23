@@ -2,9 +2,17 @@
 -- ERBots SaaS - Script de Criação do Módulo Super Admin & Pagamentos
 -- ==============================================================================
 
--- 1. Adiciona coluna is_super_admin na tabela xerb_tenants
+-- 1. Adiciona colunas is_super_admin e user_saas na tabela xerb_tenants (compatibilidade GastroSys / Supabase)
 ALTER TABLE public.xerb_tenants 
 ADD COLUMN IF NOT EXISTS is_super_admin BOOLEAN DEFAULT false;
+
+ALTER TABLE public.xerb_tenants 
+ADD COLUMN IF NOT EXISTS user_saas UUID;
+
+-- Sincroniza user_saas com user_id
+UPDATE public.xerb_tenants 
+SET user_saas = user_id 
+WHERE user_saas IS NULL AND user_id IS NOT NULL;
 
 -- 2. Define os e-mails de Super Admin oficiais
 UPDATE public.xerb_tenants 

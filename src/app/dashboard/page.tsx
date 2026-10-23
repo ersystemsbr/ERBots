@@ -31,20 +31,66 @@ export default function DashboardPage() {
         let targetTenant: any = null;
 
         if (user) {
-          setIsSuperAdmin(isDefaultAdmin(user.email));
-          // Busca tenant do usuário logado
+          const userEmail = user.email?.toLowerCase().trim() || '';
+          setIsSuperAdmin(isDefaultAdmin(userEmail));
+
+          // Busca tenant do usuário logado (por user_id ou e-mail cadastrado)
           const { data: userTenant } = await supabase
             .from('xerb_tenants')
             .select('*')
-            .eq('user_id', user.id)
+            .or(`user_id.eq.${user.id},email.eq.${userEmail}`)
             .order('created_at', { ascending: false })
             .limit(1)
             .maybeSingle();
 
-          if (userTenant) targetTenant = userTenant;
+          if (userTenant) {
+            targetTenant = userTenant;
+            // Se o tenant existia sem user_id, vincula agora
+            if (!userTenant.user_id || userTenant.user_id !== user.id) {
+              await supabase
+                .from('xerb_tenants')
+                .update({ user_id: user.id, updated_at: new Date().toISOString() })
+                .eq('id', userTenant.id);
+            }
+          } else {
+            // Usuário autenticado no Supabase (ex: via GastroSys) acessando ERBots pela 1ª vez: auto-provisiona
+            const isSuper = isDefaultAdmin(userEmail);
+            const compName = user.user_metadata?.company_name || user.user_metadata?.full_name || (isSuper ? 'ER Systems' : 'Minha Empresa');
+            const slug = `${compName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Math.random().toString(36).substring(2, 6)}`;
+
+            const { data: createdTenant } = await supabase
+              .from('xerb_tenants')
+              .insert({
+                user_id: user.id,
+                name: compName,
+                slug,
+                segment: 'Geral',
+                email: userEmail,
+                plan: isSuper ? 'business' : 'trial',
+                subscription_status: isSuper ? 'active' : 'trialing',
+                trial_ends_at: new Date(Date.now() + (isSuper ? 365 : 7) * 24 * 60 * 60 * 1000).toISOString(),
+                is_super_admin: isSuper,
+              })
+              .select()
+              .single();
+
+            if (createdTenant) {
+              targetTenant = createdTenant;
+              // Cria robô padrão
+              await supabase.from('xerb_bot_settings').insert({
+                tenant_id: createdTenant.id,
+                bot_name: `Atendente da ${compName}`,
+                tone: 'friendly',
+                gemini_model: 'gemini-2.5-flash',
+                system_prompt: `Você é o atendente virtual inteligente da empresa ${compName}.`,
+                is_active: true,
+                human_handoff_enabled: true,
+              });
+            }
+          }
         }
 
-        // 2. Se não achou pelo user_id, verifica se tem tenant ativo no localStorage
+        // 2. Se não autenticado, tenta o localStorage
         if (!targetTenant) {
           const cachedTenantId = typeof window !== 'undefined' ? localStorage.getItem('erbots_active_tenant_id') : null;
           if (cachedTenantId) {
@@ -58,27 +104,14 @@ export default function DashboardPage() {
           }
         }
 
-        // 3. Fallback: Se ainda não tiver nenhum selecionado, busca o tenant mais recente
-        if (!targetTenant) {
-          const { data: recentTenants } = await supabase
-            .from('xerb_tenants')
-            .select('*')
-            .order('created_at', { ascending: false })
-            .limit(1);
-
-          if (recentTenants && recentTenants.length > 0) {
-            targetTenant = recentTenants[0];
-          }
-        }
-
         if (targetTenant) {
           setTenant(targetTenant);
           if (typeof window !== 'undefined') {
             localStorage.setItem('erbots_active_tenant_id', targetTenant.id);
           }
         } else {
-          // Se não há nenhum tenant cadastrado na base, redireciona para criar conta
-          router.push('/cadastro');
+          // Se não há usuário logado nem tenant selecionado, vai para login
+          router.push('/login');
           return;
         }
       } catch (err) {

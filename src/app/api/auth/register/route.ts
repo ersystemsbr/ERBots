@@ -39,17 +39,42 @@ export async function POST(req: NextRequest) {
     });
 
     if (authErr) {
-      // Se o erro for que já existe, tenta fazer sign in
+      // Se o usuário já existe no Supabase Auth (ex: veio do GastroSys), valida a senha e vincula
       if (authErr.message.includes('already registered')) {
-        return NextResponse.json(
-          { error: 'Este e-mail já está cadastrado. Por favor, faça login.' },
-          { status: 400 }
-        );
-      }
-      return NextResponse.json({ error: authErr.message }, { status: 400 });
-    }
+        const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
 
-    userId = authData.user?.id || null;
+        if (signInErr) {
+          return NextResponse.json(
+            { error: 'Este e-mail já está cadastrado no sistema (GastroSys). Por favor, use a sua senha cadastrada ou faça login em /login.' },
+            { status: 400 }
+          );
+        }
+
+        userId = signInData.user?.id || null;
+
+        // Se já possui tenant no ERBots, não precisa criar outro
+        const { data: existingTenant } = await supabase
+          .from('xerb_tenants')
+          .select('*')
+          .eq('user_id', userId)
+          .maybeSingle();
+
+        if (existingTenant) {
+          return NextResponse.json({
+            success: true,
+            tenant: existingTenant,
+            message: 'Conta já existente conectada com sucesso ao ERBots.',
+          });
+        }
+      } else {
+        return NextResponse.json({ error: authErr.message }, { status: 400 });
+      }
+    } else {
+      userId = authData.user?.id || null;
+    }
 
     // 2. Cria o Tenant em xerb_tenants
     const slug = generateSlug(companyName);
