@@ -3,6 +3,7 @@ import { requireSuperAdmin } from '@/lib/auth';
 import { getGeminiApiKey } from '@/lib/ai/gemini';
 import { getEvolutionConfig } from '@/lib/evolution';
 import { isWebhookSecretConfigured } from '@/lib/webhook';
+import { isAsaasConfigured } from '@/lib/billing/asaas';
 
 export const maxDuration = 30;
 
@@ -40,6 +41,9 @@ export async function GET(req: NextRequest) {
       evolutionUrlIsTemporaryTunnel: /trycloudflare\.com/i.test(evo.apiUrl || ''),
       geminiConfigured: Boolean(gemini),
       appUrlConfigured: Boolean(process.env.NEXT_PUBLIC_APP_URL),
+      asaasConfigured: isAsaasConfigured(),
+      asaasWebhookTokenConfigured: Boolean(process.env.ASAAS_WEBHOOK_TOKEN),
+      asaasSandbox: process.env.ASAAS_ENV === 'sandbox',
     });
   } catch (err: any) {
     if (err?.digest?.startsWith('NEXT_')) throw err;

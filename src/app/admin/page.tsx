@@ -483,6 +483,15 @@ CREATE TABLE IF NOT EXISTS public.xerb_payments (
                       fix: 'Configure GEMINI_API_KEY na Vercel.',
                     },
                     {
+                      ok: health.asaasConfigured,
+                      label: `Cobrança Asaas configurada (ASAAS_API_KEY)${health.asaasSandbox ? ' — modo SANDBOX' : ''}`,
+                      fix: 'Defina ASAAS_API_KEY (e ASAAS_ENV=sandbox para testes) na Vercel. Sem isso o checkout de planos fica indisponível.',
+                    },
+                    {
+                      ok: health.asaasWebhookTokenConfigured,
+                      label: 'ASAAS_WEBHOOK_TOKEN configurado (webhook de pagamentos)',
+                      fix: 'Defina ASAAS_WEBHOOK_TOKEN na Vercel e cadastre o mesmo token no webhook do Asaas apontando para /api/webhook/asaas.',
+                    },                    {
                       ok: health.appUrlConfigured,
                       label: 'NEXT_PUBLIC_APP_URL configurada',
                       fix: 'Defina a URL pública do app na Vercel.',

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
 import { requireSuperAdmin } from '@/lib/auth';
+import { getPlan } from '@/lib/plans';
 
 export const maxDuration = 60;
 
@@ -44,18 +45,11 @@ export async function GET(req: NextRequest) {
     const connectedWhatsApps = allInstances.filter((i) => i.status === 'CONNECTED').length;
     const disconnectedWhatsApps = allInstances.filter((i) => i.status !== 'CONNECTED').length;
 
-    // Estimativa de MRR (os preços serão unificados na etapa de cobrança)
-    const planPrices: Record<string, number> = {
-      start: 97,
-      pro: 197,
-      business: 397,
-      trial: 0,
-    };
-
+    // MRR estimado: soma do preço de tabela (PLANS) dos tenants com assinatura ativa
     let estimatedMRR = 0;
     allTenants.forEach((t) => {
       if (t.subscription_status === 'active') {
-        estimatedMRR += planPrices[t.plan || 'trial'] || 0;
+        estimatedMRR += getPlan(t.plan).price;
       }
     });
 

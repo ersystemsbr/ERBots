@@ -451,9 +451,9 @@ export default function AdminTenantsTable({
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
                 >
                   <option value="trial">Trial (Teste Grátis)</option>
-                  <option value="start">Plano Start (R$ 97/mês)</option>
-                  <option value="pro">Plano Pro (R$ 197/mês)</option>
-                  <option value="business">Plano Business (R$ 397/mês)</option>
+                  <option value="start">Plano Start (R$ 149/mês)</option>
+                  <option value="pro">Plano Pro (R$ 249/mês)</option>
+                  <option value="business">Plano Business (R$ 449/mês)</option>
                 </select>
               </div>
 

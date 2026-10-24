@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
 import { requireTenantAccess } from '@/lib/auth';
+import { isValidCpfCnpj, onlyDigits } from '@/lib/plans';
 
 export const maxDuration = 30;
 
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
-    const { tenant_id, name, segment, phone, email, slug } = body;
+    const { tenant_id, name, segment, phone, email, slug, cpf_cnpj } = body;
 
     // Autenticação + autorização por posse (user_id) — o e-mail de contato NÃO define permissão
     const guard = await requireTenantAccess(req, tenant_id);
@@ -44,13 +45,32 @@ export async function PATCH(req: NextRequest) {
       updatePayload.slug = cleanSlug;
     }
 
+    if (cpf_cnpj !== undefined) {
+      const digits = onlyDigits(String(cpf_cnpj));
+      if (digits && !isValidCpfCnpj(digits)) {
+        return NextResponse.json({ error: 'CPF/CNPJ inválido.' }, { status: 400 });
+      }
+      updatePayload.cpf_cnpj = digits || null;
+    }
+
     const supabase = getServiceSupabase();
-    const { data: updated, error: updateErr } = await supabase
+    let { data: updated, error: updateErr } = await supabase
       .from('xerb_tenants')
       .update(updatePayload)
       .eq('id', guard.tenant.id)
       .select()
       .single();
+
+    // Coluna cpf_cnpj ainda não existe (migração billing_and_usage.sql pendente): salva o resto
+    if (updateErr && 'cpf_cnpj' in updatePayload && /cpf_cnpj/i.test(String((updateErr as any).message || ''))) {
+      const { cpf_cnpj: _ignored, ...rest } = updatePayload;
+      ({ data: updated, error: updateErr } = await supabase
+        .from('xerb_tenants')
+        .update(rest)
+        .eq('id', guard.tenant.id)
+        .select()
+        .single());
+    }
 
     if (updateErr) {
       if ((updateErr as any).code === '23505') {

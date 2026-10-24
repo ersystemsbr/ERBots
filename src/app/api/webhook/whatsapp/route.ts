@@ -3,6 +3,7 @@ import { getServiceSupabase } from '@/lib/supabase';
 import { sendTextMessage } from '@/lib/evolution';
 import { processAIMessage } from '@/lib/ai/gemini';
 import { verifyWebhookToken } from '@/lib/webhook';
+import { checkAiGate, recordUsage } from '@/lib/billing/usage';
 
 export const maxDuration = 60;
 
@@ -94,7 +95,11 @@ export async function POST(req: NextRequest) {
 
     // Busca dados do tenant, bot_settings e knowledge_base
     const [tenantRes, botSettingsRes, kbRes] = await Promise.all([
-      supabase.from('xerb_tenants').select('id, name, segment').eq('id', tenantId).single(),
+      supabase
+        .from('xerb_tenants')
+        .select('id, name, segment, plan, subscription_status, trial_ends_at, is_super_admin')
+        .eq('id', tenantId)
+        .single(),
       supabase.from('xerb_bot_settings').select('*').eq('tenant_id', tenantId).maybeSingle(),
       supabase.from('xerb_knowledge_base').select('category, title, content').eq('tenant_id', tenantId).eq('is_active', true),
     ]);
@@ -174,17 +179,25 @@ export async function POST(req: NextRequest) {
         content: m.content,
       }));
 
-    // 6. Salva a mensagem recebida do usuário no histórico
+    // 6. Salva a mensagem recebida do usuário no histórico (sempre salva: o dono vê no painel)
     await supabase.from('xerb_messages').insert({
       conversation_id: conversation.id,
       tenant_id: tenantId,
       sender: 'user',
       content: userText,
     });
+    await recordUsage(supabase, tenantId, { messagesIn: 1 });
 
     // 7. Se a conversa já estiver com um atendente humano, a IA NÃO responde
     if (conversation.handling_status === 'HUMAN') {
       return NextResponse.json({ success: true, handledBy: 'HUMAN' });
+    }
+
+    // 7.1 Portão de monetização: trial/assinatura vigente e limite mensal do plano
+    const gate = await checkAiGate(supabase, tenant);
+    if (!gate.allowed) {
+      console.warn(`[Webhook] IA bloqueada para o tenant ${tenantId}: ${gate.reason}`);
+      return NextResponse.json({ success: true, skipped: true, reason: gate.reason });
     }
 
     // 8. Processa a resposta com o motor de IA do ERBots
@@ -196,6 +209,15 @@ export async function POST(req: NextRequest) {
       incomingMessage: userText,
       customerName: pushName,
     });
+
+    // 8.1 Registra o consumo (apenas respostas geradas pelo Gemini contam no limite do plano)
+    if (aiResult.usage) {
+      await recordUsage(supabase, tenantId, {
+        aiReplies: 1,
+        tokensIn: aiResult.usage.tokensIn,
+        tokensOut: aiResult.usage.tokensOut,
+      });
+    }
 
     if (aiResult.reply) {
       // Envia a mensagem pelo WhatsApp via Evolution API

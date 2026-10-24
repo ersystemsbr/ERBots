@@ -1,6 +1,7 @@
 'use client';
 
 import { authFetch } from '@/lib/api-client';
+import { PLANS } from '@/lib/plans';
 
 import React, { useState, useEffect, useMemo } from 'react';
 import {
@@ -57,10 +58,10 @@ interface AdminPaymentsManagerProps {
 }
 
 const PLAN_DEFAULTS: Record<string, number> = {
-  start: 97,
-  pro: 197,
-  business: 397,
-  custom: 497,
+  start: PLANS.start.price,
+  pro: PLANS.pro.price,
+  business: PLANS.business.price,
+  custom: 549,
 };
 
 export default function AdminPaymentsManager({
@@ -79,7 +80,7 @@ export default function AdminPaymentsManager({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [savingPayment, setSavingPayment] = useState(false);
   const [selectedTenantId, setSelectedTenantId] = useState('');
-  const [amount, setAmount] = useState('97.00');
+  const [amount, setAmount] = useState(PLANS.start.price.toFixed(2));
   const [plan, setPlan] = useState('pro');
   const [paymentMethod, setPaymentMethod] = useState('pix');
   const [extendDays, setExtendDays] = useState(30);
@@ -121,7 +122,7 @@ export default function AdminPaymentsManager({
       setSelectedTenantId(initialTenantForPayment.id);
       const targetPlan = initialTenantForPayment.plan === 'trial' ? 'pro' : initialTenantForPayment.plan;
       setPlan(targetPlan);
-      setAmount((PLAN_DEFAULTS[targetPlan] || 97).toFixed(2));
+      setAmount((PLAN_DEFAULTS[targetPlan] || PLANS.start.price).toFixed(2));
       setIsModalOpen(true);
     }
   }, [initialTenantForPayment]);
@@ -138,7 +139,7 @@ export default function AdminPaymentsManager({
       setSelectedTenantId(tenants[0].id);
       const p = tenants[0].plan === 'trial' ? 'pro' : tenants[0].plan;
       setPlan(p);
-      setAmount((PLAN_DEFAULTS[p] || 97).toFixed(2));
+      setAmount((PLAN_DEFAULTS[p] || PLANS.start.price).toFixed(2));
     }
     setActionError(null);
     setActionSuccess(null);
@@ -538,9 +539,9 @@ export default function AdminPaymentsManager({
                     onChange={(e) => handlePlanChange(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-emerald-500/50 uppercase"
                   >
-                    <option value="start">START (R$ 97/mês)</option>
-                    <option value="pro">PRO (R$ 197/mês)</option>
-                    <option value="business">BUSINESS (R$ 397/mês)</option>
+                    <option value="start">START (R$ 149/mês)</option>
+                    <option value="pro">PRO (R$ 249/mês)</option>
+                    <option value="business">BUSINESS (R$ 449/mês)</option>
                     <option value="custom">CUSTOM / AVULSO</option>
                   </select>
                 </div>

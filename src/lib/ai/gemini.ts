@@ -39,6 +39,8 @@ export interface BotContext {
 
 export interface AIResponse {
   reply: string;
+  /** Presente apenas quando a resposta foi GERADA pelo Gemini (usado para medir consumo por plano) */
+  usage?: { tokensIn: number; tokensOut: number };
   triggerHandoff?: boolean;
   isOutOfHours?: boolean;
 }
@@ -289,6 +291,10 @@ ${kbString}
         return {
           reply: replyText,
           triggerHandoff: false,
+          usage: {
+            tokensIn: Number(response.usageMetadata?.promptTokenCount) || 0,
+            tokensOut: Number(response.usageMetadata?.candidatesTokenCount) || 0,
+          },
         };
       }
     } catch (err: any) {
