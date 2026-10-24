@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { getServiceSupabase } from '../supabase';
 
 export interface BotContext {
@@ -35,6 +35,84 @@ export interface BotContext {
   }>;
   incomingMessage: string;
   customerName?: string;
+}
+
+/** Modelo padrão ÚNICO do ERBots (usado por cadastro, motor de IA e fallback). */
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
+
+/** Modelos alternativos, na ordem, caso o preferido falhe por cota/indisponibilidade. */
+const FALLBACK_MODELS = [
+  'gemini-3.5-flash-lite',
+  'gemini-3.5-flash',
+  'gemini-3.1-flash-lite',
+  'gemini-3-flash-preview',
+  'gemini-flash-latest',
+];
+
+/** Modelos leves para interpretar áudio/imagem. */
+const TRANSCRIBE_MODELS = ['gemini-3.5-flash-lite', DEFAULT_GEMINI_MODEL, 'gemini-flash-latest'];
+
+/** Último modelo que respondeu com sucesso (cache por instância do servidor; não grava no banco). */
+let lastGoodModel: string | null = null;
+
+/** Marcador que a IA acrescenta quando decide transferir para um humano. */
+const HANDOFF_MARKER = /\[\[\s*HANDOFF\s*\]\]/i;
+
+/** Palavras-chave padrão de transbordo (frases específicas; evitam falsos positivos como "suporte" ou "pessoa"). */
+export const DEFAULT_HANDOFF_KEYWORDS = [
+  'atendente',
+  'atendimento humano',
+  'falar com humano',
+  'falar com um humano',
+  'falar com uma pessoa',
+  'falar com alguem',
+  'falar com o dono',
+  'falar com o gerente',
+  'falar com o responsavel',
+  'quero um humano',
+  'reclamacao',
+  'reclamar',
+  'estorno',
+  'reembolso',
+  'procon',
+];
+
+/** Lista que vinha como padrão do banco; é tratada como "não personalizada" e substituída pela nova. */
+const LEGACY_HANDOFF_KEYWORDS = ['atendente', 'humano', 'falar com atendente', 'pessoa', 'suporte'];
+
+function normalizeText(s: string): string {
+  return (s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Casa palavra/frase inteira (não pega "pessoas" por "pessoa" nem "atendentes" por engano de substring). */
+export function matchesHandoff(text: string, keywords?: string[] | null): boolean {
+  let list = keywords && keywords.length ? keywords : DEFAULT_HANDOFF_KEYWORDS;
+  const normList = list.map(normalizeText).filter(Boolean);
+  if (
+    normList.length === LEGACY_HANDOFF_KEYWORDS.length &&
+    LEGACY_HANDOFF_KEYWORDS.every((k) => normList.includes(k))
+  ) {
+    list = DEFAULT_HANDOFF_KEYWORDS;
+  }
+  const norm = normalizeText(text);
+  return list.some((kw) => {
+    const k = normalizeText(kw);
+    if (!k) return false;
+    const escaped = k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(^|[^a-z0-9])${escaped}s?([^a-z0-9]|$)`).test(norm);
+  });
+}
+
+export function defaultHandoffMessage(botSettings: { human_handoff_message?: string }): string {
+  return (
+    botSettings.human_handoff_message ||
+    'Com certeza! Estou transferindo seu atendimento para nossa equipe humana. Aguarde um instante por favor.'
+  );
 }
 
 export interface AIResponse {
@@ -126,40 +204,13 @@ export async function processAIMessage(ctx: BotContext): Promise<AIResponse> {
     };
   }
 
-  // 3. Verificação de Transbordo Humano por Palavras-Chave
-  if (botSettings.human_handoff_enabled) {
-    const keywords = botSettings.human_handoff_keywords || [
-      'atendente',
-      'humano',
-      'falar com atendente',
-      'pessoa',
-      'suporte',
-    ];
-    const normalizedIncoming = incomingMessage
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '');
-
-    const triggered = keywords.some((kw) => {
-      const normKw = kw
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .trim();
-      return normKw && normalizedIncoming.includes(normKw);
-    });
-
-    if (triggered) {
-      const handoffMsg =
-        botSettings.human_handoff_message ||
-        'Com certeza! Estou transferindo seu atendimento para nossa equipe humana. Aguarde um instante por favor.';
-      return {
-        reply: handoffMsg,
-        triggerHandoff: true,
-      };
-    }
+  // 3. Verificação de Transbordo Humano por Palavras-Chave (frase inteira, sem acentos)
+  if (botSettings.human_handoff_enabled && matchesHandoff(incomingMessage, botSettings.human_handoff_keywords)) {
+    return {
+      reply: defaultHandoffMessage(botSettings),
+      triggerHandoff: true,
+    };
   }
-
   // 4. Preparação da Base de Conhecimento
   let kbString = '';
   if (knowledgeBase && knowledgeBase.length > 0) {
@@ -208,6 +259,11 @@ DIRETRIZES CRÍTICAS:
 4. Mantenha as mensagens concisas e fáceis de ler na tela do celular. Evite parágrafos longos e monótonos.
 5. Se o cliente solicitar agendamento ou orçamento detalhado que não esteja na base, colete as informações principais e avise que a equipe dará andamento.
 ${customerName ? `6. O cliente se chama "${customerName}". Trate-o cordialmente pelo nome quando for natural.` : ''}
+${
+  botSettings.human_handoff_enabled
+    ? '7. TRANSFERÊNCIA PARA HUMANO: se o cliente pedir para falar com uma pessoa, demonstrar irritação/reclamação séria, ou o assunto exigir decisão humana (cobrança, cancelamento, negociação, casos sensíveis) e você não conseguir resolver com a base, escreva uma mensagem curta e cordial avisando que vai chamar a equipe e finalize a resposta com o marcador exato [[HANDOFF]] (o cliente não verá o marcador). Nunca use o marcador sem necessidade.'
+    : ''
+}
 
 ${botSettings.system_prompt ? `INSTRUÇÕES PERSONALIZADAS DO PROPRIETÁRIO DA EMPRESA:\n${botSettings.system_prompt}\n` : ''}
 
@@ -243,63 +299,50 @@ ${kbString}
     parts: [{ text: incomingMessage }],
   });
 
-  const preferredModel = botSettings.gemini_model || 'gemini-3.6-flash';
-  const FALLBACK_MODELS = [
-    'gemini-3.6-flash',
-    'gemini-3.5-flash-lite',
-    'gemini-3.1-flash-lite',
-    'gemini-3-flash-preview',
-    'gemini-flash-lite-latest',
-    'gemini-3.5-flash',
-    'gemini-3.7-flash',
-    'gemini-3.8-flash',
-    'gemini-flash-latest',
-  ];
-  const modelsToTry = Array.from(new Set([preferredModel, ...FALLBACK_MODELS]));
+  const preferredModel = botSettings.gemini_model || DEFAULT_GEMINI_MODEL;
+  const modelsToTry = Array.from(
+    new Set([lastGoodModel || preferredModel, preferredModel, DEFAULT_GEMINI_MODEL, ...FALLBACK_MODELS])
+  );
   let geminiError: any = null;
 
   for (const model of modelsToTry) {
-    try {
-      const response = await ai.models.generateContent({
-        model,
-        contents,
-        config: {
-          systemInstruction,
-          temperature: 0.4,
-        },
-      });
+    // `temperature` NÃO é enviado: está deprecado nos modelos 3.6+ (ignorado hoje, erro 400 no futuro).
+    // Modelos 3.x usam thinking "médio" por padrão — para atendimento no WhatsApp "baixo" é suficiente e mais barato/rápido.
+    const baseConfig: any = { systemInstruction };
+    const attempts: any[] = /^gemini-3/.test(model)
+      ? [{ ...baseConfig, thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }, baseConfig]
+      : [baseConfig];
 
-      const replyText = response.text?.trim() || '';
-      if (replyText) {
-        // Se precisou mudar de modelo por cota/limite, salva o modelo ativo no banco
-        // para que as próximas mensagens já comecem direto nele sem gastar tentativas
-        if (model !== botSettings.gemini_model && tenant.id) {
-          (async () => {
-            try {
-              const supabase = getServiceSupabase();
-              await supabase
-                .from('xerb_bot_settings')
-                .update({ gemini_model: model, updated_at: new Date().toISOString() })
-                .eq('tenant_id', tenant.id);
-              console.log(`[Gemini] Modelo padrão do tenant ${tenant.name} atualizado automaticamente para: ${model}`);
-            } catch (upErr: any) {
-              console.warn('[Gemini] Erro ao persistir novo modelo:', upErr?.message);
-            }
-          })();
+    for (const config of attempts) {
+      try {
+        const response = await ai.models.generateContent({ model, contents, config });
+
+        const rawText = response.text?.trim() || '';
+        if (rawText) {
+          // Cache em memória do último modelo que funcionou (NÃO persiste nada no banco do cliente)
+          lastGoodModel = model;
+
+          const handoffRequested = Boolean(botSettings.human_handoff_enabled) && HANDOFF_MARKER.test(rawText);
+          const replyText = rawText.replace(new RegExp(HANDOFF_MARKER.source, 'gi'), '').trim();
+
+          return {
+            reply: replyText || (handoffRequested ? defaultHandoffMessage(botSettings) : ''),
+            triggerHandoff: handoffRequested,
+            usage: {
+              tokensIn: Number(response.usageMetadata?.promptTokenCount) || 0,
+              tokensOut: Number(response.usageMetadata?.candidatesTokenCount) || 0,
+            },
+          };
         }
-
-        return {
-          reply: replyText,
-          triggerHandoff: false,
-          usage: {
-            tokensIn: Number(response.usageMetadata?.promptTokenCount) || 0,
-            tokensOut: Number(response.usageMetadata?.candidatesTokenCount) || 0,
-          },
-        };
+        break; // resposta vazia: tenta o próximo modelo
+      } catch (err: any) {
+        geminiError = err;
+        const status = err?.status || err?.code;
+        // 400 por causa do thinkingConfig: repete o mesmo modelo sem ele
+        if (status === 400 && config !== baseConfig) continue;
+        console.warn(`[Gemini] Falha no modelo ${model} (${status || 'erro'}). Alternando para o próximo modelo...`);
+        break;
       }
-    } catch (err: any) {
-      console.warn(`[Gemini] Falha no modelo ${model} (${err?.status || 'erro'}). Alternando para o próximo modelo...`);
-      geminiError = err;
     }
   }
 
@@ -308,4 +351,51 @@ ${kbString}
     reply: 'Olá! Nosso atendente virtual está temporariamente com alta demanda de mensagens, mas já registrei seu contato e nossa equipe responderá em instantes! 😊',
     triggerHandoff: false,
   };
+}
+
+/**
+ * Converte mídia (áudio/imagem) em texto para o restante do fluxo (histórico, transbordo, resposta).
+ * Retorna null se não conseguir (o chamador pede ao cliente que escreva).
+ */
+export async function transcribeMedia(params: {
+  kind: 'audio' | 'image';
+  base64: string;
+  mimeType: string;
+  caption?: string;
+}): Promise<{ text: string; tokensIn: number; tokensOut: number } | null> {
+  const apiKey = await getGeminiApiKey();
+  if (!apiKey) return null;
+  const ai = new GoogleGenAI({ apiKey });
+
+  const instruction =
+    params.kind === 'audio'
+      ? 'Transcreva fielmente este áudio de WhatsApp em português, sem comentários e sem aspas. Se não houver fala compreensível, responda apenas: [inaudível]'
+      : `Descreva objetivamente esta imagem enviada por um cliente no WhatsApp (e transcreva qualquer texto visível, como preços, nomes ou comprovantes), em no máximo 3 frases.${
+          params.caption ? ` Legenda enviada pelo cliente: "${params.caption}".` : ''
+        }`;
+
+  for (const model of TRANSCRIBE_MODELS) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: [
+          {
+            role: 'user',
+            parts: [{ inlineData: { mimeType: params.mimeType, data: params.base64 } }, { text: instruction }],
+          },
+        ],
+      });
+      const text = response.text?.trim() || '';
+      if (text) {
+        return {
+          text,
+          tokensIn: Number(response.usageMetadata?.promptTokenCount) || 0,
+          tokensOut: Number(response.usageMetadata?.candidatesTokenCount) || 0,
+        };
+      }
+    } catch (err: any) {
+      console.warn(`[Gemini] Falha ao interpretar mídia no modelo ${model} (${err?.status || 'erro'}).`);
+    }
+  }
+  return null;
 }

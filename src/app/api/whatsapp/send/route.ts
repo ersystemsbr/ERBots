@@ -107,21 +107,31 @@ export async function POST(req: NextRequest) {
       convId = conv.id;
     }
 
-    // 2. Envia mensagem via Evolution API
+    // 2. Grava a mensagem ANTES de enviar (o webhook compara com o "eco" da Evolution para não
+    //    confundir uma mensagem enviada pelo painel com uma resposta digitada no celular do dono)
+    let savedMessageId: string | null = null;
+    if (convId) {
+      const { data: savedMsg } = await supabase
+        .from('xerb_messages')
+        .insert({
+          conversation_id: convId,
+          tenant_id: tenant.id,
+          sender: 'human',
+          content: text.trim(),
+        })
+        .select('id')
+        .single();
+      savedMessageId = savedMsg?.id || null;
+    }
+
+    // 3. Envia mensagem via Evolution API
     const sent = await sendTextMessage(inst.instance_name, remoteJid, text.trim());
     if (!sent) {
+      if (savedMessageId) await supabase.from('xerb_messages').delete().eq('id', savedMessageId);
       return NextResponse.json({ error: 'Falha ao despachar mensagem pelo WhatsApp' }, { status: 500 });
     }
 
-    // 3. Salva no histórico de mensagens se tiver convId
     if (convId) {
-      await supabase.from('xerb_messages').insert({
-        conversation_id: convId,
-        tenant_id: tenant.id,
-        sender: 'human',
-        content: text.trim(),
-      });
-
       await supabase
         .from('xerb_conversations')
         .update({

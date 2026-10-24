@@ -1,20 +1,270 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
-import { sendTextMessage } from '@/lib/evolution';
-import { processAIMessage } from '@/lib/ai/gemini';
+import { sendTextMessage, getMediaBase64, normalizeBrPhone } from '@/lib/evolution';
+import { processAIMessage, transcribeMedia } from '@/lib/ai/gemini';
 import { verifyWebhookToken } from '@/lib/webhook';
 import { checkAiGate, recordUsage } from '@/lib/billing/usage';
 
 export const maxDuration = 60;
 
-function extractText(messageObj: any): string {
-  if (!messageObj) return '';
-  if (messageObj.conversation) return messageObj.conversation;
-  if (messageObj.extendedTextMessage?.text) return messageObj.extendedTextMessage.text;
-  if (messageObj.imageMessage?.caption) return messageObj.imageMessage.caption;
-  return '';
+// ---------------------------------------------------------------------------
+// Parâmetros de comportamento do atendimento
+// ---------------------------------------------------------------------------
+/** Espera para agrupar mensagens seguidas do cliente em UMA resposta */
+const DEBOUNCE_MS = 2500;
+/** Janela para reconhecer o "eco" de mensagens que o próprio sistema enviou */
+const ECHO_WINDOW_MS = 2 * 60 * 1000;
+const ECHO_RECHECK_MS = 1500;
+/** Após esse tempo sem nenhuma resposta (humano/IA), a conversa volta automaticamente para a IA */
+const HUMAN_TIMEOUT_HOURS = 12;
+/** Mensagem de "fora do horário" é enviada no máximo 1x neste intervalo, por conversa */
+const OUT_OF_HOURS_COOLDOWN_HOURS = 6;
+const MAX_AUDIO_SECONDS = 180;
+const MAX_MEDIA_BASE64_CHARS = 14_000_000; // ~10 MB
+
+type Db = ReturnType<typeof getServiceSupabase>;
+
+/** Vira false se o SQL database/ai_quality.sql ainda não foi aplicado (sem dedupe por ID). */
+let waIdSupported = true;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const HOUR_MS = 60 * 60 * 1000;
+
+// ---------------------------------------------------------------------------
+// Extração do conteúdo da mensagem
+// ---------------------------------------------------------------------------
+type Content =
+  | { kind: 'text'; text: string }
+  | { kind: 'audio'; seconds: number; mimeType: string }
+  | { kind: 'image'; caption: string; mimeType: string }
+  | { kind: 'ignored' };
+
+function unwrapMessage(raw: any): any {
+  let cur = raw;
+  for (let i = 0; i < 3 && cur; i++) {
+    const inner =
+      cur.ephemeralMessage?.message ||
+      cur.viewOnceMessage?.message ||
+      cur.viewOnceMessageV2?.message ||
+      cur.documentWithCaptionMessage?.message ||
+      cur.editedMessage?.message;
+    if (!inner) break;
+    cur = inner;
+  }
+  return cur;
 }
 
+function extractContent(raw: any): Content {
+  const m = unwrapMessage(raw);
+  if (!m) return { kind: 'ignored' };
+
+  const text =
+    m.conversation ||
+    m.extendedTextMessage?.text ||
+    m.buttonsResponseMessage?.selectedDisplayText ||
+    m.listResponseMessage?.title ||
+    m.templateButtonReplyMessage?.selectedDisplayText ||
+    '';
+  if (text) return { kind: 'text', text: String(text) };
+
+  if (m.audioMessage) {
+    return {
+      kind: 'audio',
+      seconds: Number(m.audioMessage.seconds) || 0,
+      mimeType: String(m.audioMessage.mimetype || 'audio/ogg').split(';')[0],
+    };
+  }
+  if (m.imageMessage) {
+    return {
+      kind: 'image',
+      caption: String(m.imageMessage.caption || ''),
+      mimeType: String(m.imageMessage.mimetype || 'image/jpeg').split(';')[0],
+    };
+  }
+  return { kind: 'ignored' };
+}
+
+function samePhone(a?: string | null, b?: string | null): boolean {
+  const da = (a || '').replace(/\D/g, '');
+  const db = (b || '').replace(/\D/g, '');
+  if (da.length < 8 || db.length < 8) return false;
+  // Compara os 8 últimos dígitos (tolera diferença do 9º dígito dos celulares BR)
+  return da.slice(-8) === db.slice(-8);
+}
+
+// ---------------------------------------------------------------------------
+// Persistência de mensagens (com deduplicação opcional por ID do WhatsApp)
+// ---------------------------------------------------------------------------
+async function isDuplicate(db: Db, tenantId: string, waId?: string | null): Promise<boolean> {
+  if (!waId || !waIdSupported) return false;
+  const { data, error } = await db
+    .from('xerb_messages')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .eq('wa_message_id', waId)
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    if (/wa_message_id/i.test(error.message || '') || (error as any).code === '42703') waIdSupported = false;
+    return false;
+  }
+  return Boolean(data);
+}
+
+/** Retorna o id da mensagem, 'DUPLICATE' (ID já processado) ou null (falha). */
+async function insertMessage(
+  db: Db,
+  row: Record<string, any>,
+  waId?: string | null
+): Promise<string | 'DUPLICATE' | null> {
+  if (waId && waIdSupported) {
+    const { data, error } = await db
+      .from('xerb_messages')
+      .insert({ ...row, wa_message_id: waId })
+      .select('id')
+      .single();
+    if (!error) return data?.id || null;
+    if ((error as any).code === '23505') return 'DUPLICATE';
+    if (/wa_message_id/i.test(error.message || '') || ['42703', 'PGRST204'].includes((error as any).code)) {
+      waIdSupported = false; // coluna ainda não existe: segue sem dedupe
+    } else {
+      console.error('[Webhook] Erro ao salvar mensagem:', error);
+      return null;
+    }
+  }
+  const { data, error } = await db.from('xerb_messages').insert(row).select('id').single();
+  if (error) {
+    console.error('[Webhook] Erro ao salvar mensagem:', error);
+    return null;
+  }
+  return data?.id || null;
+}
+
+/** A mensagem fromMe recente é "eco" de algo que NÓS enviamos (IA ou painel)? */
+async function isOwnEcho(db: Db, conversationId: string, text: string): Promise<boolean> {
+  const since = new Date(Date.now() - ECHO_WINDOW_MS).toISOString();
+  const { data } = await db
+    .from('xerb_messages')
+    .select('id')
+    .eq('conversation_id', conversationId)
+    .in('sender', ['ai', 'human'])
+    .eq('content', text)
+    .gte('created_at', since)
+    .limit(1);
+  return Boolean(data && data.length);
+}
+
+// ---------------------------------------------------------------------------
+// Aviso ao dono quando um cliente precisa de atendimento humano
+// ---------------------------------------------------------------------------
+async function notifyOwnerOfHandoff(args: {
+  instanceName: string;
+  tenant: { phone?: string | null; name?: string | null };
+  customerName: string;
+  customerPhone: string;
+  lastMessage: string;
+}) {
+  try {
+    const owner = normalizeBrPhone(args.tenant.phone);
+    if (!owner || samePhone(owner, args.customerPhone)) return;
+
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/+$/, '');
+    const preview = args.lastMessage.length > 220 ? `${args.lastMessage.slice(0, 220)}…` : args.lastMessage;
+    const lines = [
+      '🔔 *ERBots – atendimento humano solicitado*',
+      '',
+      `Cliente: *${args.customerName || args.customerPhone}* (+${args.customerPhone})`,
+      `Última mensagem: "${preview}"`,
+      '',
+      'A IA está pausada nesta conversa. Responda direto pelo WhatsApp' +
+        (appUrl ? ` ou pelo painel: ${appUrl}/dashboard` : '.'),
+      `(Se ninguém responder em ${HUMAN_TIMEOUT_HOURS}h, a IA volta a atender sozinha.)`,
+    ];
+    await sendTextMessage(args.instanceName, owner, lines.join('\n'));
+  } catch (err) {
+    console.warn('[Webhook] Falha ao avisar o dono sobre o transbordo:', err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Mensagem enviada pelo próprio dono (celular) → pausa a IA nessa conversa
+// ---------------------------------------------------------------------------
+async function handleOwnerMessage(
+  db: Db,
+  params: { tenant: any; tenantId: string; remoteJid: string; cleanPhone: string; waId?: string | null; content: Content }
+) {
+  const { tenant, tenantId, remoteJid, cleanPhone, waId, content } = params;
+
+  // Mensagens para o próprio número do dono (ex.: avisos de transbordo) não são conversas de cliente
+  if (samePhone(cleanPhone, normalizeBrPhone(tenant.phone))) {
+    return NextResponse.json({ skipped: true, reason: 'owner self chat' });
+  }
+
+  let text = '';
+  if (content.kind === 'text') text = content.text.trim();
+  else if (content.kind === 'audio' || content.kind === 'image') text = '📎 [Mídia enviada pelo atendente]';
+  if (!text) return NextResponse.json({ skipped: true, reason: 'fromMe ignored' });
+
+  if (await isDuplicate(db, tenantId, waId)) {
+    return NextResponse.json({ skipped: true, reason: 'duplicate' });
+  }
+
+  const findConv = async () => {
+    const { data } = await db
+      .from('xerb_conversations')
+      .select('id, handling_status')
+      .eq('tenant_id', tenantId)
+      .eq('remote_jid', remoteJid)
+      .maybeSingle();
+    return data;
+  };
+
+  let conv = await findConv();
+  if (conv && (await isOwnEcho(db, conv.id, text))) {
+    return NextResponse.json({ skipped: true, reason: 'own echo' });
+  }
+
+  // Dá tempo de a rota que enviou (painel/IA) gravar a mensagem e confere de novo
+  await sleep(ECHO_RECHECK_MS);
+  conv = await findConv();
+  if (conv && (await isOwnEcho(db, conv.id, text))) {
+    return NextResponse.json({ skipped: true, reason: 'own echo' });
+  }
+
+  const nowIso = new Date().toISOString();
+  if (!conv) {
+    // O dono iniciou a conversa pelo celular: já nasce em modo humano (a IA não interrompe)
+    const { data: created } = await db
+      .from('xerb_conversations')
+      .insert({
+        tenant_id: tenantId,
+        remote_jid: remoteJid,
+        contact_name: cleanPhone,
+        contact_phone: cleanPhone,
+        handling_status: 'HUMAN',
+        last_message: text,
+        last_message_at: nowIso,
+        unread_count: 0,
+      })
+      .select('id, handling_status')
+      .single();
+    conv = created;
+  } else {
+    await db
+      .from('xerb_conversations')
+      .update({ handling_status: 'HUMAN', last_message: text, last_message_at: nowIso, updated_at: nowIso })
+      .eq('id', conv.id);
+  }
+
+  if (!conv) return NextResponse.json({ error: 'Failed to record owner message' }, { status: 500 });
+
+  await insertMessage(db, { conversation_id: conv.id, tenant_id: tenantId, sender: 'human', content: text }, waId);
+  return NextResponse.json({ success: true, ownerReplied: true, aiPaused: true });
+}
+
+// ---------------------------------------------------------------------------
+// Webhook principal
+// ---------------------------------------------------------------------------
 export async function POST(req: NextRequest) {
   try {
     // Segurança: só aceita chamadas da Evolution API com o token secreto do webhook
@@ -54,7 +304,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, event: 'connection.update' });
     }
 
-    // 2. Filtra apenas eventos de mensagem recebida (MESSAGES_UPSERT)
+    // 2. Filtra apenas eventos de mensagem (MESSAGES_UPSERT)
     if (!rawEvent.includes('message')) {
       return NextResponse.json({ skipped: true, reason: 'Ignored non-message event' });
     }
@@ -63,20 +313,16 @@ export async function POST(req: NextRequest) {
     const key = data.key || {};
     const message = data.message;
     const pushName = data.pushName || '';
-
-    // Evita loops: ignora mensagens enviadas pelo próprio robô/atendente
-    if (key.fromMe) {
-      return NextResponse.json({ skipped: true, reason: 'fromMe message' });
-    }
+    const waId: string | null = key.id || null;
 
     const remoteJid = key.remoteJid || '';
     if (!remoteJid || remoteJid.includes('@g.us') || remoteJid.includes('@broadcast')) {
       return NextResponse.json({ skipped: true, reason: 'Group or broadcast' });
     }
 
-    const userText = extractText(message).trim();
-    if (!userText) {
-      return NextResponse.json({ skipped: true, reason: 'No text extracted' });
+    const content = extractContent(message);
+    if (content.kind === 'ignored') {
+      return NextResponse.json({ skipped: true, reason: 'Unsupported message type' });
     }
 
     // 3. Localiza a instância e o Tenant correspondente
@@ -92,12 +338,13 @@ export async function POST(req: NextRequest) {
     }
 
     const tenantId = instanceRow.tenant_id;
+    const cleanPhone = remoteJid.replace(/@s\.whatsapp\.net$/, '').replace(/:\d+$/, '').replace(/\D/g, '');
 
     // Busca dados do tenant, bot_settings e knowledge_base
     const [tenantRes, botSettingsRes, kbRes] = await Promise.all([
       supabase
         .from('xerb_tenants')
-        .select('id, name, segment, plan, subscription_status, trial_ends_at, is_super_admin')
+        .select('id, name, segment, phone, plan, subscription_status, trial_ends_at, is_super_admin')
         .eq('id', tenantId)
         .single(),
       supabase.from('xerb_bot_settings').select('*').eq('tenant_id', tenantId).maybeSingle(),
@@ -109,6 +356,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ skipped: true, reason: 'Tenant not found' });
     }
 
+    // 3.1 Mensagem enviada pelo próprio número conectado (dono respondendo pelo celular, eco do painel/IA)
+    if (key.fromMe) {
+      return await handleOwnerMessage(supabase, { tenant, tenantId, remoteJid, cleanPhone, waId, content });
+    }
+
+    // 3.2 Idempotência: a Evolution pode reenviar o mesmo webhook
+    if (await isDuplicate(supabase, tenantId, waId)) {
+      return NextResponse.json({ skipped: true, reason: 'duplicate' });
+    }
+
     const botSettings = botSettingsRes.data || {
       bot_name: 'Atendente Virtual',
       tone: 'friendly',
@@ -117,8 +374,58 @@ export async function POST(req: NextRequest) {
     };
     const knowledgeBase = kbRes.data || [];
 
-    // 4. Cria ou recupera a Conversa no banco
-    const cleanPhone = remoteJid.replace(/@s\.whatsapp\.net$/, '').replace(/:\d+$/, '').replace(/\D/g, '');
+    // 3.3 Portão de monetização (assinatura/trial vigente + limite mensal do plano)
+    const gate = await checkAiGate(supabase, tenant);
+    const canUseAI = gate.allowed && botSettings.is_active !== false;
+
+    // 4. Texto da mensagem (áudio e imagem são interpretados pelo Gemini)
+    let userText = '';
+    let mediaFailed = false;
+
+    if (content.kind === 'text') {
+      userText = content.text.trim();
+    } else if (!canUseAI) {
+      userText = content.kind === 'audio' ? '🎤 [Áudio recebido]' : `🖼️ [Imagem recebida]${content.caption ? ` ${content.caption}` : ''}`;
+    } else if (content.kind === 'audio' && content.seconds > MAX_AUDIO_SECONDS) {
+      userText = '🎤 [Áudio muito longo]';
+      mediaFailed = true;
+    } else {
+      const media = (data.message?.base64
+        ? { base64: String(data.message.base64), mimeType: content.mimeType }
+        : await getMediaBase64(instanceName, { id: key.id, remoteJid, fromMe: false })) as
+        | { base64: string; mimeType: string }
+        | null;
+
+      const tooBig = media ? media.base64.length > MAX_MEDIA_BASE64_CHARS : false;
+      const result =
+        media && !tooBig
+          ? await transcribeMedia({
+              kind: content.kind,
+              base64: media.base64,
+              mimeType: media.mimeType || content.mimeType,
+              caption: content.kind === 'image' ? content.caption : undefined,
+            })
+          : null;
+
+      if (result) {
+        await recordUsage(supabase, tenantId, { tokensIn: result.tokensIn, tokensOut: result.tokensOut });
+        userText =
+          content.kind === 'audio'
+            ? `🎤 ${result.text}`
+            : `🖼️ [Imagem: ${result.text}]${content.caption ? ` Legenda: ${content.caption}` : ''}`;
+      } else {
+        userText = content.kind === 'audio' ? '🎤 [Áudio não pôde ser interpretado]' : '🖼️ [Imagem recebida]';
+        mediaFailed = content.kind === 'audio';
+        // Imagem sem interpretação: segue só com a legenda, se houver
+        if (content.kind === 'image' && content.caption) userText = `🖼️ [Imagem] ${content.caption}`;
+      }
+    }
+
+    if (!userText) {
+      return NextResponse.json({ skipped: true, reason: 'No text extracted' });
+    }
+
+    // 5. Cria ou recupera a Conversa no banco
     let { data: conversation } = await supabase
       .from('xerb_conversations')
       .select('*')
@@ -163,54 +470,115 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to find or create conversation' }, { status: 500 });
     }
 
-    // 5. Busca o histórico recente ANTES de gravar a mensagem atual
-    //    (as 10 mais RECENTES, em ordem cronológica; a mensagem atual é enviada à IA separadamente)
-    const { data: rawMessages } = await supabase
-      .from('xerb_messages')
-      .select('sender, content')
-      .eq('conversation_id', conversation.id)
-      .order('created_at', { ascending: false })
-      .limit(10);
-
-    const history = (rawMessages || [])
-      .reverse()
-      .map((m: any) => ({
-        sender: m.sender as 'user' | 'ai' | 'human',
-        content: m.content,
-      }));
-
-    // 6. Salva a mensagem recebida do usuário no histórico (sempre salva: o dono vê no painel)
-    await supabase.from('xerb_messages').insert({
-      conversation_id: conversation.id,
-      tenant_id: tenantId,
-      sender: 'user',
-      content: userText,
-    });
+    // 6. Salva a mensagem recebida (sempre: o dono vê no painel)
+    const userMsgId = await insertMessage(
+      supabase,
+      { conversation_id: conversation.id, tenant_id: tenantId, sender: 'user', content: userText },
+      waId
+    );
+    if (userMsgId === 'DUPLICATE') {
+      return NextResponse.json({ skipped: true, reason: 'duplicate' });
+    }
     await recordUsage(supabase, tenantId, { messagesIn: 1 });
 
-    // 7. Se a conversa já estiver com um atendente humano, a IA NÃO responde
+    // 7. Conversa com atendente humano: a IA NÃO responde (até o dono devolver ou o prazo vencer)
     if (conversation.handling_status === 'HUMAN') {
-      return NextResponse.json({ success: true, handledBy: 'HUMAN' });
+      const { data: lastOut } = await supabase
+        .from('xerb_messages')
+        .select('created_at')
+        .eq('conversation_id', conversation.id)
+        .in('sender', ['ai', 'human'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const lastOutAt = lastOut?.created_at ? new Date(lastOut.created_at).getTime() : 0;
+      if (lastOutAt && Date.now() - lastOutAt > HUMAN_TIMEOUT_HOURS * HOUR_MS) {
+        // Ninguém respondeu: devolve a conversa para a IA
+        await supabase
+          .from('xerb_conversations')
+          .update({ handling_status: 'AI', updated_at: new Date().toISOString() })
+          .eq('id', conversation.id);
+        conversation.handling_status = 'AI';
+      } else {
+        return NextResponse.json({ success: true, handledBy: 'HUMAN' });
+      }
     }
 
-    // 7.1 Portão de monetização: trial/assinatura vigente e limite mensal do plano
-    const gate = await checkAiGate(supabase, tenant);
+    // 7.1 Bloqueado por assinatura/limite (a mensagem já foi salva)
     if (!gate.allowed) {
       console.warn(`[Webhook] IA bloqueada para o tenant ${tenantId}: ${gate.reason}`);
       return NextResponse.json({ success: true, skipped: true, reason: gate.reason });
     }
 
-    // 8. Processa a resposta com o motor de IA do ERBots
+    // 7.2 Áudio que não deu para ouvir: pede para o cliente escrever (não consome IA)
+    if (mediaFailed && botSettings.is_active !== false) {
+      const failText = 'Não consegui ouvir seu áudio 😕 Poderia escrever sua mensagem, por favor?';
+      const failId = await insertMessage(supabase, {
+        conversation_id: conversation.id,
+        tenant_id: tenantId,
+        sender: 'ai',
+        content: failText,
+      });
+      const sent = await sendTextMessage(instanceName, remoteJid, failText);
+      if (!sent && failId && failId !== 'DUPLICATE') await supabase.from('xerb_messages').delete().eq('id', failId);
+      return NextResponse.json({ success: true, replied: sent, reason: 'audio_unavailable' });
+    }
+
+    // 8. Agrupa mensagens seguidas (debounce) e monta o histórico a partir do banco
+    let incomingBlock = userText;
+    let history: Array<{ sender: 'user' | 'ai' | 'human'; content: string }> = [];
+
+    if (userMsgId) {
+      await sleep(DEBOUNCE_MS);
+
+      const { data: recent } = await supabase
+        .from('xerb_messages')
+        .select('id, sender, content, created_at')
+        .eq('conversation_id', conversation.id)
+        .order('created_at', { ascending: false })
+        .limit(30);
+      const rows = recent || [];
+
+      // Chegou outra mensagem depois (a outra execução responde por todas) ou alguém já respondeu
+      if (!rows.length || rows[0].id !== userMsgId) {
+        return NextResponse.json({ success: true, skipped: true, reason: 'debounced' });
+      }
+
+      // O dono pode ter assumido a conversa durante a espera
+      const { data: convNow } = await supabase
+        .from('xerb_conversations')
+        .select('handling_status')
+        .eq('id', conversation.id)
+        .maybeSingle();
+      if (convNow?.handling_status === 'HUMAN') {
+        return NextResponse.json({ success: true, handledBy: 'HUMAN' });
+      }
+
+      const block: string[] = [];
+      let i = 0;
+      while (i < rows.length && rows[i].sender === 'user' && block.length < 8) {
+        block.unshift(rows[i].content);
+        i++;
+      }
+      incomingBlock = block.join('\n');
+      history = rows
+        .slice(i, i + 10)
+        .reverse()
+        .map((m: any) => ({ sender: m.sender as 'user' | 'ai' | 'human', content: m.content }));
+    }
+
+    // 9. Processa a resposta com o motor de IA do ERBots
     const aiResult = await processAIMessage({
       tenant,
       botSettings,
       knowledgeBase,
       conversationHistory: history,
-      incomingMessage: userText,
+      incomingMessage: incomingBlock,
       customerName: pushName,
     });
 
-    // 8.1 Registra o consumo (apenas respostas geradas pelo Gemini contam no limite do plano)
+    // 9.1 Registra o consumo (apenas respostas geradas pelo Gemini contam no limite do plano)
     if (aiResult.usage) {
       await recordUsage(supabase, tenantId, {
         aiReplies: 1,
@@ -219,34 +587,66 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    if (aiResult.reply) {
-      // Envia a mensagem pelo WhatsApp via Evolution API
-      await sendTextMessage(instanceName, remoteJid, aiResult.reply);
+    if (!aiResult.reply) {
+      return NextResponse.json({ success: true, replied: false, handoff: false });
+    }
 
-      // Salva a resposta da IA no banco
-      await supabase.from('xerb_messages').insert({
-        conversation_id: conversation.id,
-        tenant_id: tenantId,
-        sender: 'ai',
-        content: aiResult.reply,
+    // 9.2 "Fora do horário": avisa no máximo 1x por período, não a cada mensagem
+    if (aiResult.isOutOfHours) {
+      const since = new Date(Date.now() - OUT_OF_HOURS_COOLDOWN_HOURS * HOUR_MS).toISOString();
+      const { data: already } = await supabase
+        .from('xerb_messages')
+        .select('id')
+        .eq('conversation_id', conversation.id)
+        .eq('sender', 'ai')
+        .eq('content', aiResult.reply)
+        .gte('created_at', since)
+        .limit(1);
+      if (already && already.length) {
+        return NextResponse.json({ success: true, skipped: true, reason: 'out_of_hours_cooldown' });
+      }
+    }
+
+    // 10. Grava a resposta ANTES de enviar (permite reconhecer o eco do envio) e despacha
+    const aiMsgId = await insertMessage(supabase, {
+      conversation_id: conversation.id,
+      tenant_id: tenantId,
+      sender: 'ai',
+      content: aiResult.reply,
+    });
+
+    const sent = await sendTextMessage(instanceName, remoteJid, aiResult.reply);
+    if (!sent) {
+      if (aiMsgId && aiMsgId !== 'DUPLICATE') await supabase.from('xerb_messages').delete().eq('id', aiMsgId);
+      console.error(`[Webhook] Não foi possível enviar a resposta para ${cleanPhone} (instância ${instanceName}).`);
+      return NextResponse.json({ success: true, replied: false, reason: 'send_failed' });
+    }
+
+    // 11. Atualiza o status da conversa (transbordo → modo humano + aviso ao dono)
+    const newStatus = aiResult.triggerHandoff ? 'HUMAN' : 'AI';
+    await supabase
+      .from('xerb_conversations')
+      .update({
+        handling_status: newStatus,
+        last_message: aiResult.reply,
+        last_message_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', conversation.id);
+
+    if (aiResult.triggerHandoff) {
+      await notifyOwnerOfHandoff({
+        instanceName,
+        tenant,
+        customerName: pushName || conversation.contact_name || '',
+        customerPhone: cleanPhone,
+        lastMessage: incomingBlock,
       });
-
-      // Atualiza o status da conversa
-      const newStatus = aiResult.triggerHandoff ? 'HUMAN' : 'AI';
-      await supabase
-        .from('xerb_conversations')
-        .update({
-          handling_status: newStatus,
-          last_message: aiResult.reply,
-          last_message_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', conversation.id);
     }
 
     return NextResponse.json({
       success: true,
-      replied: Boolean(aiResult.reply),
+      replied: true,
       handoff: Boolean(aiResult.triggerHandoff),
     });
   } catch (err: any) {

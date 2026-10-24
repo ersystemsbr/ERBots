@@ -31,7 +31,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     monthlyAiReplies: 150,
     maxInstances: 1,
     description: '7 dias para testar com seus clientes reais.',
-    features: ['1 conexão de WhatsApp', '150 respostas de IA no período de teste'],
+    features: [],
   },
   start: {
     id: 'start',
@@ -41,8 +41,6 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     maxInstances: 1,
     description: 'Ideal para autônomos, consultórios e pequenos negócios.',
     features: [
-      '1 conexão de WhatsApp',
-      'Até 1.000 respostas de IA por mês',
       'Atendente IA Gemini 24/7',
       'Base de conhecimento (FAQ e serviços)',
       'Personalização de tom de voz',
@@ -58,8 +56,6 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     maxInstances: 1,
     description: 'O mais escolhido por empresas que buscam automação e controle.',
     features: [
-      '1 conexão de WhatsApp',
-      'Até 3.000 respostas de IA por mês',
       'Base de conhecimento ilimitada',
       'Transbordo humano inteligente',
       'Live Chat / CRM em tempo real',
@@ -76,8 +72,6 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     maxInstances: 3,
     description: 'Para empresas maiores, clínicas com várias unidades e alto volume.',
     features: [
-      'Até 3 conexões de WhatsApp',
-      'Até 10.000 respostas de IA por mês',
       'IA com ajuste fino de prompts complexos',
       'Transbordo com roteamento de equipe',
       'Treinamento e setup assistido',
@@ -88,8 +82,8 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
 
 export const PAID_PLAN_IDS: PaidPlanId[] = ['start', 'pro', 'business'];
 
-export function getPlan(id?: string | null): PlanDefinition {
-  return PLANS[(id as PlanId) in PLANS ? (id as PlanId) : 'trial'];
+export function getPlan(id?: string | null, plans: Record<PlanId, PlanDefinition> = PLANS): PlanDefinition {
+  return plans[(id as PlanId) in plans ? (id as PlanId) : 'trial'];
 }
 
 export function isPaidPlan(id?: string | null): id is PaidPlanId {
@@ -98,6 +92,67 @@ export function isPaidPlan(id?: string | null): id is PaidPlanId {
 
 export function formatBRL(value: number): string {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+// ---------------------------------------------------------------------------
+// PERSONALIZAÇÃO PELO PAINEL ADMIN (preços, limites e textos variáveis)
+// Os valores acima são o PADRÃO; o admin sobrescreve em xerb_system_config (chave plans_config).
+// ---------------------------------------------------------------------------
+
+export interface PlanOverride {
+  name?: string;
+  price?: number;
+  monthlyAiReplies?: number;
+  maxInstances?: number;
+  description?: string;
+  /** Benefícios adicionais (um por item). Os limites de conexões/respostas são gerados automaticamente. */
+  features?: string[];
+}
+
+export type PlanOverrides = Partial<Record<PlanId, PlanOverride>>;
+
+/** Valida/normaliza dados vindos do admin ou do banco. Ignora campos inválidos. */
+export function sanitizePlanOverrides(input: any): PlanOverrides {
+  const out: PlanOverrides = {};
+  if (!input || typeof input !== 'object') return out;
+  for (const id of Object.keys(PLANS) as PlanId[]) {
+    const raw = input[id];
+    if (!raw || typeof raw !== 'object') continue;
+    const o: PlanOverride = {};
+    if (typeof raw.name === 'string' && raw.name.trim()) o.name = raw.name.trim().slice(0, 40);
+    if (typeof raw.description === 'string') o.description = raw.description.trim().slice(0, 200);
+    const price = Number(raw.price);
+    // Trial é sempre gratuito
+    if (id !== 'trial' && Number.isFinite(price) && price >= 5 && price <= 100000) o.price = Math.round(price * 100) / 100;
+    const replies = Number(raw.monthlyAiReplies);
+    if (Number.isFinite(replies) && replies >= 1 && replies <= 10000000) o.monthlyAiReplies = Math.floor(replies);
+    const inst = Number(raw.maxInstances);
+    if (Number.isFinite(inst) && inst >= 1 && inst <= 100) o.maxInstances = Math.floor(inst);
+    if (Array.isArray(raw.features)) {
+      o.features = raw.features
+        .filter((f: any) => typeof f === 'string' && f.trim())
+        .map((f: string) => f.trim().slice(0, 120))
+        .slice(0, 20);
+    }
+    if (Object.keys(o).length) out[id] = o;
+  }
+  return out;
+}
+
+/** Aplica os overrides sobre o padrão e devolve a tabela de planos efetiva. */
+export function applyPlanOverrides(overrides: PlanOverrides = {}): Record<PlanId, PlanDefinition> {
+  const result = {} as Record<PlanId, PlanDefinition>;
+  for (const id of Object.keys(PLANS) as PlanId[]) {
+    result[id] = { ...PLANS[id], ...(overrides[id] || {}), id };
+  }
+  return result;
+}
+
+/** Lista de benefícios exibida ao cliente (limites sempre refletem os números atuais). */
+export function planFeatureList(plan: PlanDefinition): string[] {
+  const conexoes = plan.maxInstances === 1 ? '1 conexão de WhatsApp' : `Até ${plan.maxInstances} conexões de WhatsApp`;
+  const respostas = `Até ${plan.monthlyAiReplies.toLocaleString('pt-BR')} respostas de IA por mês`;
+  return [conexoes, respostas, ...plan.features];
 }
 
 // ---------------------------------------------------------------------------

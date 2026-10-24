@@ -25,11 +25,13 @@ import {
   Copy,
   Check,
   Lock,
+  Sparkles,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { isDefaultAdmin } from '@/lib/admin';
 import AdminTenantsTable from '@/components/admin/AdminTenantsTable';
 import AdminPaymentsManager from '@/components/admin/AdminPaymentsManager';
+import AdminPlansEditor from '@/components/admin/AdminPlansEditor';
 
 interface Metrics {
   mrr: number;
@@ -46,7 +48,7 @@ export default function AdminDashboardPage() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
-  const [activeTab, setActiveTab] = useState<'tenants' | 'payments' | 'system'>('tenants');
+  const [activeTab, setActiveTab] = useState<'tenants' | 'payments' | 'plans' | 'system'>('tenants');
 
   // Dados globais do admin
   const [metrics, setMetrics] = useState<Metrics | null>(null);
@@ -402,6 +404,17 @@ CREATE TABLE IF NOT EXISTS public.xerb_payments (
           </button>
 
           <button
+            onClick={() => setActiveTab('plans')}
+            className={`pb-4 text-sm font-semibold flex items-center gap-2 border-b-2 transition ${
+              activeTab === 'plans'
+                ? 'border-emerald-400 text-emerald-400'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Sparkles className="w-4 h-4" />
+            Planos & Preços
+          </button>
+          <button
             onClick={() => setActiveTab('system')}
             className={`pb-4 text-sm font-semibold flex items-center gap-2 border-b-2 transition ${
               activeTab === 'system'
@@ -433,6 +446,9 @@ CREATE TABLE IF NOT EXISTS public.xerb_payments (
             onPaymentSuccess={handleRefresh}
           />
         )}
+
+        {/* Conteúdo: Planos & Preços (editável) */}
+        {activeTab === 'plans' && <AdminPlansEditor />}
 
         {/* Conteúdo da Aba 3: Sistema & Infraestrutura */}
         {activeTab === 'system' && (
@@ -575,25 +591,25 @@ CREATE TABLE IF NOT EXISTS public.xerb_payments (
 
                 <div className="space-y-2 pt-2 text-xs">
                   <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950 border border-slate-800">
-                    <span className="text-slate-300 font-mono">1. gemini-2.5-flash</span>
+                    <span className="text-slate-300 font-mono">1. gemini-3.6-flash</span>
                     <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-[10px] font-semibold">
                       Principal (Default)
                     </span>
                   </div>
                   <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950 border border-slate-800">
-                    <span className="text-slate-300 font-mono">2. gemini-2.0-flash</span>
+                    <span className="text-slate-300 font-mono">2. gemini-3.5-flash-lite</span>
                     <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 text-[10px] font-semibold">
                       Fallback 1
                     </span>
                   </div>
                   <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950 border border-slate-800">
-                    <span className="text-slate-300 font-mono">3. gemini-2.0-flash-lite</span>
+                    <span className="text-slate-300 font-mono">3. gemini-3.5-flash</span>
                     <span className="px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 text-[10px] font-semibold">
                       Fallback 2
                     </span>
                   </div>
                   <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950 border border-slate-800">
-                    <span className="text-slate-300 font-mono">4. gemini-1.5-flash</span>
+                    <span className="text-slate-300 font-mono">4. gemini-3.1-flash-lite</span>
                     <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 text-[10px] font-semibold">
                       Fallback 3
                     </span>

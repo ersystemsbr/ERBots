@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { timingSafeEqual } from 'crypto';
 import { getServiceSupabase } from '@/lib/supabase';
-import { BILLING_PERIOD_DAYS, PLANS, isPaidPlan, type PaidPlanId } from '@/lib/plans';
+import { BILLING_PERIOD_DAYS, isPaidPlan, type PaidPlanId, type PlanDefinition, type PlanId } from '@/lib/plans';
+import { getPlansConfig } from '@/lib/billing/plans-config';
 
 export const maxDuration = 30;
 
@@ -30,10 +31,10 @@ function mapMethod(billingType?: string): string {
 }
 
 /** Descobre o plano pago a partir do tenant (billing_plan) ou, na falta, pelo valor cobrado. */
-function resolvePlan(tenant: any, value?: number): PaidPlanId | null {
+function resolvePlan(tenant: any, plans: Record<PlanId, PlanDefinition>, value?: number): PaidPlanId | null {
   if (isPaidPlan(tenant.billing_plan)) return tenant.billing_plan;
-  const byValue = (Object.values(PLANS) as any[]).find((p) => p.price > 0 && p.price === Number(value));
-  if (byValue) return byValue.id;
+  const byValue = (Object.values(plans) as PlanDefinition[]).find((p) => p.price > 0 && p.price === Number(value));
+  if (byValue && isPaidPlan(byValue.id)) return byValue.id;
   return isPaidPlan(tenant.plan) ? tenant.plan : null;
 }
 
@@ -103,7 +104,8 @@ export async function POST(req: NextRequest) {
 
     // 3. Pagamento confirmado/recebido → ativa e estende o período
     if (event === 'PAYMENT_CONFIRMED' || event === 'PAYMENT_RECEIVED') {
-      const plan = resolvePlan(tenant, payment?.value);
+      const plansCfg = await getPlansConfig();
+      const plan = resolvePlan(tenant, plansCfg, payment?.value);
       if (!plan) {
         console.error('[Asaas Webhook] Não foi possível determinar o plano do pagamento', payment?.id);
         return NextResponse.json({ received: true, error: 'plan_unresolved' });
@@ -117,7 +119,7 @@ export async function POST(req: NextRequest) {
       let alreadyProcessed = false;
       const { error: payErr } = await supabase.from('xerb_payments').insert({
         tenant_id: tenant.id,
-        amount: Number(payment?.value) || PLANS[plan].price,
+        amount: Number(payment?.value) || plansCfg[plan].price,
         plan,
         payment_method: mapMethod(payment?.billingType),
         status: 'confirmed',

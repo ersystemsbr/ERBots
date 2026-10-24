@@ -256,3 +256,43 @@ export async function sendTextMessage(
     return false;
   }
 }
+
+/**
+ * Baixa a mídia (áudio/imagem) de uma mensagem recebida em base64 via Evolution API.
+ * Retorna null se a Evolution não conseguir (mídia expirada, versão sem o endpoint etc.).
+ */
+export async function getMediaBase64(
+  instanceName: string,
+  messageKey: { id?: string; remoteJid?: string; fromMe?: boolean }
+): Promise<{ base64: string; mimeType: string } | null> {
+  const { apiUrl, apiKey } = await getEvolutionConfig();
+  if (!apiUrl || !apiKey || !messageKey?.id) return null;
+
+  try {
+    const res = await fetch(`${apiUrl}/chat/getBase64FromMediaMessage/${instanceName}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: apiKey },
+      body: JSON.stringify({ message: { key: messageKey }, convertToMp4: false }),
+    });
+    if (!res.ok) {
+      console.warn(`[Evolution] Falha ao baixar mídia (${res.status}):`, (await res.text()).slice(0, 200));
+      return null;
+    }
+    const data = await res.json();
+    const base64: string | undefined = data?.base64 || data?.data?.base64;
+    const mimeType: string = (data?.mimetype || data?.mimeType || '').split(';')[0];
+    if (!base64) return null;
+    return { base64: base64.replace(/^data:[^;]+;base64,/, ''), mimeType };
+  } catch (err) {
+    console.error('[Evolution] Exceção ao baixar mídia:', err);
+    return null;
+  }
+}
+
+/** Normaliza um telefone brasileiro para o formato internacional (somente dígitos, com 55). */
+export function normalizeBrPhone(raw?: string | null): string | null {
+  const d = (raw || '').replace(/\D/g, '');
+  if (d.length === 10 || d.length === 11) return `55${d}`;
+  if ((d.length === 12 || d.length === 13) && d.startsWith('55')) return d;
+  return null;
+}

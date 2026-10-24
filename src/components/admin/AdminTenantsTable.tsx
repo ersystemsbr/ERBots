@@ -1,6 +1,8 @@
 'use client';
 
 import { authFetch } from '@/lib/api-client';
+import { usePlans } from '@/lib/use-plans';
+import { formatBRL } from '@/lib/plans';
 
 import React, { useState } from 'react';
 import {
@@ -57,6 +59,7 @@ export default function AdminTenantsTable({
   onRefresh,
   onOpenPaymentModal,
 }: AdminTenantsTableProps) {
+  const plansCfg = usePlans();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
@@ -451,9 +454,9 @@ export default function AdminTenantsTable({
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
                 >
                   <option value="trial">Trial (Teste Grátis)</option>
-                  <option value="start">Plano Start (R$ 149/mês)</option>
-                  <option value="pro">Plano Pro (R$ 249/mês)</option>
-                  <option value="business">Plano Business (R$ 449/mês)</option>
+                  <option value="start">Plano Start ({formatBRL(plansCfg.start.price)}/mês)</option>
+                  <option value="pro">Plano Pro ({formatBRL(plansCfg.pro.price)}/mês)</option>
+                  <option value="business">Plano Business ({formatBRL(plansCfg.business.price)}/mês)</option>
                 </select>
               </div>
 

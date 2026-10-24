@@ -1,5 +1,6 @@
 import { getServiceSupabase } from '../supabase';
 import { currentUsagePeriod, getAccessState, getPlan, type AccessReason } from '../plans';
+import { getPlansConfig } from './plans-config';
 
 type Db = ReturnType<typeof getServiceSupabase>;
 
@@ -75,7 +76,7 @@ export async function checkAiGate(
 
   if (tenant.is_super_admin) return { allowed: true, reason: 'ok' };
 
-  const plan = getPlan(tenant.plan);
+  const plan = getPlan(tenant.plan, await getPlansConfig());
   const usage = await getUsage(db, tenant.id);
   if (usage.ai_replies >= plan.monthlyAiReplies) return { allowed: false, reason: 'limit_reached' };
 

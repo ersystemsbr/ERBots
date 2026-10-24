@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { DEFAULT_GEMINI_MODEL } from '@/lib/ai/gemini';
 import { getServiceSupabase } from '@/lib/supabase';
 
 function generateSlug(name: string): string {
@@ -107,7 +108,7 @@ export async function POST(req: NextRequest) {
       tenant_id: tenant.id,
       bot_name: `Atendente da ${companyName}`,
       tone: 'friendly',
-      gemini_model: 'gemini-3.5-flash',
+      gemini_model: DEFAULT_GEMINI_MODEL,
       system_prompt: `Você é o atendente virtual inteligente da empresa ${companyName} (${segment || 'Serviços'}). Seja acolhedor, tire dúvidas e passe informações com simpatia.`,
       is_active: true,
       human_handoff_enabled: true,

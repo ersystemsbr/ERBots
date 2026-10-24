@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
 import { requireSuperAdmin } from '@/lib/auth';
 import { getPlan } from '@/lib/plans';
+import { getPlansConfig } from '@/lib/billing/plans-config';
 
 export const maxDuration = 60;
 
@@ -46,10 +47,11 @@ export async function GET(req: NextRequest) {
     const disconnectedWhatsApps = allInstances.filter((i) => i.status !== 'CONNECTED').length;
 
     // MRR estimado: soma do preço de tabela (PLANS) dos tenants com assinatura ativa
+    const plansCfg = await getPlansConfig();
     let estimatedMRR = 0;
     allTenants.forEach((t) => {
       if (t.subscription_status === 'active') {
-        estimatedMRR += getPlan(t.plan).price;
+        estimatedMRR += getPlan(t.plan, plansCfg).price;
       }
     });
 

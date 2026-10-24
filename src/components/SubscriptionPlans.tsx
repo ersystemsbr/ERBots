@@ -4,8 +4,9 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Check, Sparkles, AlertTriangle, Loader2, RefreshCw, ExternalLink, XCircle } from 'lucide-react';
 import { authFetch } from '@/lib/api-client';
 import { supabase } from '@/lib/supabase';
+import { usePlans } from '@/lib/use-plans';
 import {
-  PLANS,
+  planFeatureList,
   PAID_PLAN_IDS,
   PaidPlanId,
   currentUsagePeriod,
@@ -38,7 +39,8 @@ function maskCpfCnpj(v: string): string {
 
 export default function SubscriptionPlans({ tenant, onTenantUpdated }: SubscriptionPlansProps) {
   const currentPlanId: string = tenant?.plan || 'trial';
-  const currentPlan = getPlan(currentPlanId);
+  const plans = usePlans();
+  const currentPlan = getPlan(currentPlanId, plans);
   const access = getAccessState(tenant || {});
   const status: string = tenant?.subscription_status || 'trialing';
 
@@ -263,7 +265,7 @@ export default function SubscriptionPlans({ tenant, onTenantUpdated }: Subscript
       {/* Cards de planos */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {PAID_PLAN_IDS.map((id) => {
-          const p = PLANS[id];
+          const p = plans[id];
           const isCurrent = currentPlanId === id && status === 'active';
           const busy = busyPlan === id;
           return (
@@ -291,7 +293,7 @@ export default function SubscriptionPlans({ tenant, onTenantUpdated }: Subscript
                 </div>
 
                 <ul className="space-y-3 pt-4 border-t border-slate-800 text-xs text-slate-300">
-                  {p.features.map((feat, idx) => (
+                  {planFeatureList(p).map((feat, idx) => (
                     <li key={idx} className="flex items-start gap-2">
                       <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                       <span>{feat}</span>

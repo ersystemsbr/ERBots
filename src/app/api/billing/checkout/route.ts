@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
 import { requireTenantAccess } from '@/lib/auth';
-import { PLANS, isPaidPlan, isValidCpfCnpj, onlyDigits } from '@/lib/plans';
+import { isPaidPlan, isValidCpfCnpj, onlyDigits } from '@/lib/plans';
+import { getPlansConfig } from '@/lib/billing/plans-config';
 import {
   AsaasError,
   cancelSubscription,
@@ -73,7 +74,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Nova assinatura
-    const def = PLANS[plan];
+    const def = (await getPlansConfig())[plan];
     const subscription = await createSubscription({
       customerId,
       value: def.price,
