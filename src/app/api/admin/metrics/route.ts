@@ -1,17 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
-import { isSuperAdminEmail } from '@/lib/admin';
+import { requireSuperAdmin } from '@/lib/auth';
 
 export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('x-user-email') || '';
-    const isAdmin = await isSuperAdminEmail(authHeader);
-
-    if (!isAdmin) {
-      return NextResponse.json({ error: 'Acesso não autorizado.' }, { status: 403 });
-    }
+    const guard = await requireSuperAdmin(req);
+    if (!guard.ok) return guard.response;
 
     const supabase = getServiceSupabase();
 
@@ -48,7 +44,7 @@ export async function GET(req: NextRequest) {
     const connectedWhatsApps = allInstances.filter((i) => i.status === 'CONNECTED').length;
     const disconnectedWhatsApps = allInstances.filter((i) => i.status !== 'CONNECTED').length;
 
-    // Estimativa de MRR
+    // Estimativa de MRR (os preços serão unificados na etapa de cobrança)
     const planPrices: Record<string, number> = {
       start: 97,
       pro: 197,
@@ -63,25 +59,31 @@ export async function GET(req: NextRequest) {
       }
     });
 
+    const plansBreakdown = {
+      trial: allTenants.filter((t) => t.plan === 'trial').length,
+      start: allTenants.filter((t) => t.plan === 'start').length,
+      pro: allTenants.filter((t) => t.plan === 'pro').length,
+      business: allTenants.filter((t) => t.plan === 'business').length,
+    };
+
+    // O painel admin consome `metrics` com estes nomes de campo
     return NextResponse.json({
-      totalClients,
-      activeSubscribers,
-      trialingClients,
-      pastDueClients,
-      connectedWhatsApps,
-      disconnectedWhatsApps,
-      totalMessages: totalMessages || 0,
-      estimatedMRR,
-      plansBreakdown: {
-        trial: allTenants.filter((t) => t.plan === 'trial').length,
-        start: allTenants.filter((t) => t.plan === 'start').length,
-        pro: allTenants.filter((t) => t.plan === 'pro').length,
-        business: allTenants.filter((t) => t.plan === 'business').length,
+      metrics: {
+        mrr: estimatedMRR,
+        totalTenants: totalClients,
+        activeSubscribers,
+        trialTenants: trialingClients,
+        pastDueTenants: pastDueClients,
+        connectedInstances: connectedWhatsApps,
+        disconnectedInstances: disconnectedWhatsApps,
+        totalInstances: allInstances.length,
+        totalMessages: totalMessages || 0,
+        plansBreakdown,
       },
     });
   } catch (err: any) {
     if (err?.digest?.startsWith('NEXT_')) throw err;
     console.error('[Admin Metrics] Erro fatal:', err);
-    return NextResponse.json({ error: err?.message || 'Erro interno' }, { status: 500 });
+    return NextResponse.json({ error: 'Erro interno ao calcular métricas.' }, { status: 500 });
   }
 }

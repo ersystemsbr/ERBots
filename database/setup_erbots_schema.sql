@@ -107,12 +107,13 @@ CREATE TABLE IF NOT EXISTS public.xerb_system_config (
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- Inserir configurações padrão da Evolution API
-INSERT INTO public.xerb_system_config (key, value, description)
-VALUES 
-    ('evolution_api_url', 'https://mia-easter-semester-eddie.trycloudflare.com', 'URL pública da Evolution API no servidor Linux'),
-    ('evolution_api_key', '4296ef346897636e05d2524f2b1860e6', 'Chave Global API da Evolution API')
-ON CONFLICT (key) DO NOTHING;
+-- As credenciais da Evolution API NÃO ficam mais neste arquivo (segurança).
+-- Configure EVOLUTION_API_URL e EVOLUTION_API_KEY nas variáveis de ambiente da Vercel,
+-- ou insira manualmente (fora do Git) na tabela abaixo:
+--   INSERT INTO public.xerb_system_config (key, value, description)
+--   VALUES ('evolution_api_url', '<URL>', 'URL pública da Evolution API'),
+--          ('evolution_api_key', '<CHAVE>', 'Chave Global API da Evolution API')
+--   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 
 -- 8. Índices de Alta Performance
 CREATE INDEX IF NOT EXISTS idx_xerb_tenants_user ON public.xerb_tenants(user_id);
@@ -139,12 +140,8 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Users can view own xerb_tenant') THEN
         CREATE POLICY "Users can view own xerb_tenant" ON public.xerb_tenants FOR SELECT USING (auth.uid() = user_id);
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Users can update own xerb_tenant') THEN
-        CREATE POLICY "Users can update own xerb_tenant" ON public.xerb_tenants FOR UPDATE USING (auth.uid() = user_id);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Users can insert own xerb_tenant') THEN
-        CREATE POLICY "Users can insert own xerb_tenant" ON public.xerb_tenants FOR INSERT WITH CHECK (auth.uid() = user_id);
-    END IF;
+    -- Atenção: o cliente NÃO atualiza/insere xerb_tenants diretamente (plano/status/posse são definidos pelo servidor).
+    -- Alterações de perfil passam por /api/tenant/profile e a criação por /api/tenant/bootstrap (service role).
 
     -- xerb_instances
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Tenant users manage xerb_instances') THEN
@@ -202,26 +199,5 @@ BEGIN
         CREATE POLICY "Service role full access xerb_system_config" ON public.xerb_system_config FOR ALL TO service_role USING (true) WITH CHECK (true);
     END IF;
 
-    -- Fallback público (anon) para leitura e inserção inicial durante fase de implantação/testes
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Anon read access xerb_tenants') THEN
-        CREATE POLICY "Anon read access xerb_tenants" ON public.xerb_tenants FOR ALL TO anon USING (true) WITH CHECK (true);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Anon read access xerb_instances') THEN
-        CREATE POLICY "Anon read access xerb_instances" ON public.xerb_instances FOR ALL TO anon USING (true) WITH CHECK (true);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Anon read access xerb_bot_settings') THEN
-        CREATE POLICY "Anon read access xerb_bot_settings" ON public.xerb_bot_settings FOR ALL TO anon USING (true) WITH CHECK (true);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Anon read access xerb_knowledge_base') THEN
-        CREATE POLICY "Anon read access xerb_knowledge_base" ON public.xerb_knowledge_base FOR ALL TO anon USING (true) WITH CHECK (true);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Anon read access xerb_conversations') THEN
-        CREATE POLICY "Anon read access xerb_conversations" ON public.xerb_conversations FOR ALL TO anon USING (true) WITH CHECK (true);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Anon read access xerb_messages') THEN
-        CREATE POLICY "Anon read access xerb_messages" ON public.xerb_messages FOR ALL TO anon USING (true) WITH CHECK (true);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Anon read access xerb_system_config') THEN
-        CREATE POLICY "Anon read access xerb_system_config" ON public.xerb_system_config FOR ALL TO anon USING (true) WITH CHECK (true);
-    END IF;
+    -- (Removido) Políticas abertas para o papel 'anon': NUNCA expor tabelas ao anon. Veja database/security_hardening.sql.
 END $$;

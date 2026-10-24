@@ -1,73 +1,67 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
-import { isSuperAdminEmail } from '@/lib/admin';
+import { requireTenantAccess } from '@/lib/auth';
 
 export const maxDuration = 30;
 
 export async function PATCH(req: NextRequest) {
   try {
-    const authEmail = (req.headers.get('x-user-email') || '').toLowerCase().trim();
     const body = await req.json();
     const { tenant_id, name, segment, phone, email, slug } = body;
 
-    if (!tenant_id) {
-      return NextResponse.json({ error: 'tenant_id é obrigatório.' }, { status: 400 });
-    }
+    // Autenticação + autorização por posse (user_id) — o e-mail de contato NÃO define permissão
+    const guard = await requireTenantAccess(req, tenant_id);
+    if (!guard.ok) return guard.response;
 
-    const supabase = getServiceSupabase();
-
-    // 1. Busca o tenant para validar permissão
-    const { data: existingTenant, error: fetchErr } = await supabase
-      .from('xerb_tenants')
-      .select('*')
-      .eq('id', tenant_id)
-      .maybeSingle();
-
-    if (fetchErr || !existingTenant) {
-      return NextResponse.json({ error: 'Empresa não encontrada.' }, { status: 404 });
-    }
-
-    // 2. Valida se o usuário tem permissão para editar este tenant
-    const isAdmin = await isSuperAdminEmail(authEmail);
-    const isOwner = authEmail && existingTenant.email && authEmail === existingTenant.email.toLowerCase().trim();
-
-    // Se não for super admin nem dono registrado pelo e-mail, checa se há match de usuário logado
-    if (!isAdmin && !isOwner) {
-      return NextResponse.json(
-        { error: 'Você não tem permissão para alterar os dados desta empresa.' },
-        { status: 403 }
-      );
-    }
-
-    // 3. Monta o payload de atualização
     const updatePayload: Record<string, any> = {
       updated_at: new Date().toISOString(),
     };
 
-    if (name !== undefined) updatePayload.name = String(name).trim();
-    if (segment !== undefined) updatePayload.segment = String(segment).trim();
-    if (phone !== undefined) updatePayload.phone = String(phone).trim() || null;
-    if (email !== undefined) updatePayload.email = String(email).trim().toLowerCase() || null;
+    if (name !== undefined) {
+      const clean = String(name).trim();
+      if (!clean || clean.length > 120) {
+        return NextResponse.json({ error: 'Informe um nome de empresa válido (até 120 caracteres).' }, { status: 400 });
+      }
+      updatePayload.name = clean;
+    }
+    if (segment !== undefined) updatePayload.segment = String(segment).trim().slice(0, 80);
+    if (phone !== undefined) updatePayload.phone = String(phone).trim().slice(0, 30) || null;
+    if (email !== undefined) {
+      const cleanEmail = String(email).trim().toLowerCase().slice(0, 160);
+      if (cleanEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+        return NextResponse.json({ error: 'E-mail de contato inválido.' }, { status: 400 });
+      }
+      updatePayload.email = cleanEmail || null;
+    }
     if (slug !== undefined) {
       const cleanSlug = String(slug)
         .toLowerCase()
         .replace(/[^a-z0-9_-]/g, '')
-        .trim();
-      if (cleanSlug) updatePayload.slug = cleanSlug;
+        .slice(0, 60);
+      if (!cleanSlug) {
+        return NextResponse.json({ error: 'Identificador (slug) inválido.' }, { status: 400 });
+      }
+      updatePayload.slug = cleanSlug;
     }
 
+    const supabase = getServiceSupabase();
     const { data: updated, error: updateErr } = await supabase
       .from('xerb_tenants')
       .update(updatePayload)
-      .eq('id', tenant_id)
+      .eq('id', guard.tenant.id)
       .select()
       .single();
 
-    if (updateErr) throw updateErr;
+    if (updateErr) {
+      if ((updateErr as any).code === '23505') {
+        return NextResponse.json({ error: 'Este identificador (slug) já está em uso. Escolha outro.' }, { status: 409 });
+      }
+      throw updateErr;
+    }
 
     return NextResponse.json({ success: true, tenant: updated });
   } catch (err: any) {
     console.error('[Tenant Profile PATCH] Erro:', err);
-    return NextResponse.json({ error: err?.message || 'Erro interno ao salvar dados.' }, { status: 500 });
+    return NextResponse.json({ error: 'Erro interno ao salvar dados.' }, { status: 500 });
   }
 }

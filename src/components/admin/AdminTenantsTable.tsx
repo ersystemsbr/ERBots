@@ -1,5 +1,7 @@
 'use client';
 
+import { authFetch } from '@/lib/api-client';
+
 import React, { useState } from 'react';
 import {
   Building2,
@@ -94,11 +96,10 @@ export default function AdminTenantsTable({
     if (!editingTenant) return;
     setSaving(true);
     try {
-      const res = await fetch('/api/admin/tenants', {
+      const res = await authFetch('/api/admin/tenants', {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          'x-user-email': userEmail,
         },
         body: JSON.stringify({
           tenant_id: editingTenant.id,
@@ -129,11 +130,10 @@ export default function AdminTenantsTable({
   const handleExtendTrial = async (tenantId: string, days: number) => {
     if (!confirm(`Deseja prorrogar o teste desta empresa em +${days} dias?`)) return;
     try {
-      const res = await fetch('/api/admin/tenants', {
+      const res = await authFetch('/api/admin/tenants', {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          'x-user-email': userEmail,
         },
         body: JSON.stringify({
           tenant_id: tenantId,

@@ -1,5 +1,7 @@
 'use client';
 
+import { authFetch } from '@/lib/api-client';
+
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -52,6 +54,9 @@ export default function AdminDashboardPage() {
   const [loadingMetrics, setLoadingMetrics] = useState(false);
   const [tenantForPayment, setTenantForPayment] = useState<any | null>(null);
   const [copiedSql, setCopiedSql] = useState(false);
+  const [health, setHealth] = useState<any>(null);
+  const [resyncing, setResyncing] = useState(false);
+  const [resyncMsg, setResyncMsg] = useState<string | null>(null);
 
   // 1. Verificação de autenticação e Super Admin
   useEffect(() => {
@@ -92,12 +97,8 @@ export default function AdminDashboardPage() {
     setLoadingMetrics(true);
     try {
       const [metricsRes, tenantsRes] = await Promise.all([
-        fetch('/api/admin/metrics', {
-          headers: { 'x-user-email': userEmail },
-        }),
-        fetch('/api/admin/tenants', {
-          headers: { 'x-user-email': userEmail },
-        }),
+        authFetch('/api/admin/metrics'),
+        authFetch('/api/admin/tenants'),
       ]);
 
       if (metricsRes.ok) {
@@ -113,6 +114,39 @@ export default function AdminDashboardPage() {
       console.error('Erro ao carregar métricas:', e);
     } finally {
       setLoadingMetrics(false);
+    }
+  };
+
+  const loadHealth = async () => {
+    try {
+      const res = await authFetch('/api/admin/health');
+      if (res.ok) setHealth(await res.json());
+    } catch (e) {
+      console.error('Erro ao carregar diagnóstico:', e);
+    }
+  };
+
+  useEffect(() => {
+    if (isAdmin && activeTab === 'system') {
+      loadHealth();
+    }
+  }, [isAdmin, activeTab]);
+
+  const handleResyncWebhooks = async () => {
+    setResyncing(true);
+    setResyncMsg(null);
+    try {
+      const res = await authFetch('/api/admin/webhooks', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Falha ao ressincronizar.');
+      setResyncMsg(
+        `${data.success}/${data.total} instâncias atualizadas${data.tokenProtected ? ' (com token)' : ' (SEM token: defina WEBHOOK_SECRET)'}` +
+          (data.failed?.length ? ` — falhas: ${data.failed.join(', ')}` : '')
+      );
+    } catch (e: any) {
+      setResyncMsg(`Erro: ${e?.message}`);
+    } finally {
+      setResyncing(false);
     }
   };
 
@@ -403,6 +437,87 @@ CREATE TABLE IF NOT EXISTS public.xerb_payments (
         {/* Conteúdo da Aba 3: Sistema & Infraestrutura */}
         {activeTab === 'system' && (
           <div className="space-y-6">
+            {/* Diagnóstico de Segurança & Configuração */}
+            <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+                    <ShieldAlert className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-white">Diagnóstico de Segurança &amp; Configuração</h3>
+                    <p className="text-xs text-slate-400">Pré-requisitos de produção (nenhum segredo é exibido)</p>
+                  </div>
+                </div>
+                <button
+                  onClick={loadHealth}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 transition"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" /> Reverificar
+                </button>
+              </div>
+
+              {!health ? (
+                <p className="text-xs text-slate-400">Verificando…</p>
+              ) : (
+                <ul className="space-y-2 text-xs">
+                  {[
+                    {
+                      ok: health.serviceRoleKey?.configured && health.serviceRoleKey?.validRole,
+                      label: 'SUPABASE_SERVICE_ROLE_KEY configurada (role service_role)',
+                      fix: 'Defina na Vercel (Settings > Environment Variables) e faça redeploy. Obrigatório ANTES de rodar o SQL de hardening.',
+                    },
+                    {
+                      ok: health.webhookSecretConfigured,
+                      label: 'WEBHOOK_SECRET configurado (webhook protegido)',
+                      fix: 'Defina WEBHOOK_SECRET na Vercel (string aleatória longa), faça redeploy e clique em "Ressincronizar webhooks".',
+                    },
+                    {
+                      ok: health.evolutionConfigured && !health.evolutionUrlIsTemporaryTunnel,
+                      label: 'Evolution API com URL estável (não é túnel temporário trycloudflare)',
+                      fix: 'A URL atual é um túnel temporário ou não está configurada. Migre para domínio fixo.',
+                    },
+                    {
+                      ok: health.geminiConfigured,
+                      label: 'Chave do Gemini encontrada',
+                      fix: 'Configure GEMINI_API_KEY na Vercel.',
+                    },
+                    {
+                      ok: health.appUrlConfigured,
+                      label: 'NEXT_PUBLIC_APP_URL configurada',
+                      fix: 'Defina a URL pública do app na Vercel.',
+                    },
+                  ].map((item, idx) => (
+                    <li
+                      key={idx}
+                      className={`p-3 rounded-xl border ${
+                        item.ok
+                          ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-300'
+                          : 'bg-rose-500/5 border-rose-500/20 text-rose-300'
+                      }`}
+                    >
+                      <div className="font-semibold">
+                        {item.ok ? '✅' : '❌'} {item.label}
+                      </div>
+                      {!item.ok && <div className="mt-1 text-slate-400">{item.fix}</div>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <div className="flex flex-wrap items-center gap-3 pt-2">
+                <button
+                  onClick={handleResyncWebhooks}
+                  disabled={resyncing}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${resyncing ? 'animate-spin' : ''}`} />
+                  Ressincronizar webhooks de todas as instâncias
+                </button>
+                {resyncMsg && <span className="text-xs text-slate-300">{resyncMsg}</span>}
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Card Webhook & Evolution API */}
               <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">

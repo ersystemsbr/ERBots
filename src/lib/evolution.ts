@@ -65,6 +65,37 @@ export interface InstanceState {
 }
 
 /**
+ * (Re)registra o webhook de uma instância na Evolution API
+ */
+export async function setInstanceWebhook(instanceName: string, webhookUrl: string): Promise<boolean> {
+  const { apiUrl, apiKey } = await getEvolutionConfig();
+  if (!apiUrl || !apiKey) return false;
+
+  try {
+    const res = await fetch(`${apiUrl}/webhook/set/${instanceName}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: apiKey,
+      },
+      body: JSON.stringify({
+        webhook: {
+          enabled: true,
+          url: webhookUrl,
+          byEvents: false,
+          base64: false,
+          events: ['MESSAGES_UPSERT', 'CONNECTION_UPDATE'],
+        },
+      }),
+    });
+    return res.ok;
+  } catch (whErr) {
+    console.warn('[Evolution] Erro ao registrar webhook:', whErr);
+    return false;
+  }
+}
+
+/**
  * Cria ou recupera uma instância do WhatsApp na Evolution API
  */
 export async function createOrGetInstance(
@@ -100,26 +131,7 @@ export async function createOrGetInstance(
 
   // Helper para cadastrar webhook
   const registerWebhook = async () => {
-    try {
-      await fetch(`${apiUrl}/webhook/set/${instanceName}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: apiKey,
-        },
-        body: JSON.stringify({
-          webhook: {
-            enabled: true,
-            url: webhookUrl,
-            byEvents: false,
-            base64: false,
-            events: ['MESSAGES_UPSERT', 'CONNECTION_UPDATE'],
-          },
-        }),
-      });
-    } catch (whErr) {
-      console.warn('[Evolution] Erro ao registrar webhook:', whErr);
-    }
+    await setInstanceWebhook(instanceName, webhookUrl);
   };
 
   // Se não existir, cria a instância

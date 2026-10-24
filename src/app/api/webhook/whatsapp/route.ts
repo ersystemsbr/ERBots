@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
 import { sendTextMessage } from '@/lib/evolution';
 import { processAIMessage } from '@/lib/ai/gemini';
+import { verifyWebhookToken } from '@/lib/webhook';
 
 export const maxDuration = 60;
 
@@ -15,6 +16,11 @@ function extractText(messageObj: any): string {
 
 export async function POST(req: NextRequest) {
   try {
+    // Segurança: só aceita chamadas da Evolution API com o token secreto do webhook
+    if (!verifyWebhookToken(req)) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const payload = await req.json();
     const rawEvent = (payload.event || '').toLowerCase();
     const instanceName = payload.instance || '';
@@ -152,7 +158,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to find or create conversation' }, { status: 500 });
     }
 
-    // 5. Salva a mensagem recebida do usuário no histórico
+    // 5. Busca o histórico recente ANTES de gravar a mensagem atual
+    //    (as 10 mais RECENTES, em ordem cronológica; a mensagem atual é enviada à IA separadamente)
+    const { data: rawMessages } = await supabase
+      .from('xerb_messages')
+      .select('sender, content')
+      .eq('conversation_id', conversation.id)
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    const history = (rawMessages || [])
+      .reverse()
+      .map((m: any) => ({
+        sender: m.sender as 'user' | 'ai' | 'human',
+        content: m.content,
+      }));
+
+    // 6. Salva a mensagem recebida do usuário no histórico
     await supabase.from('xerb_messages').insert({
       conversation_id: conversation.id,
       tenant_id: tenantId,
@@ -160,23 +182,10 @@ export async function POST(req: NextRequest) {
       content: userText,
     });
 
-    // 6. Se a conversa já estiver com um atendente humano, a IA NÃO responde
+    // 7. Se a conversa já estiver com um atendente humano, a IA NÃO responde
     if (conversation.handling_status === 'HUMAN') {
       return NextResponse.json({ success: true, handledBy: 'HUMAN' });
     }
-
-    // 7. Busca histórico recente de mensagens desta conversa
-    const { data: rawMessages } = await supabase
-      .from('xerb_messages')
-      .select('sender, content')
-      .eq('conversation_id', conversation.id)
-      .order('created_at', { ascending: true })
-      .limit(10);
-
-    const history = (rawMessages || []).map((m: any) => ({
-      sender: m.sender as 'user' | 'ai' | 'human',
-      content: m.content,
-    }));
 
     // 8. Processa a resposta com o motor de IA do ERBots
     const aiResult = await processAIMessage({
@@ -220,6 +229,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: any) {
     console.error('[Webhook] Erro fatal:', err);
-    return NextResponse.json({ error: err?.message || 'Internal Error' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal Error' }, { status: 500 });
   }
 }

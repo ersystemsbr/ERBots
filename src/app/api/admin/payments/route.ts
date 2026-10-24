@@ -1,17 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
-import { isSuperAdminEmail } from '@/lib/admin';
+import { requireSuperAdmin } from '@/lib/auth';
 
 export const maxDuration = 60;
 
+const VALID_PLANS = ['trial', 'start', 'pro', 'business', 'custom'];
+const VALID_METHODS = ['pix', 'credit_card', 'boleto', 'manual', 'transfer'];
+
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('x-user-email') || '';
-    const isAdmin = await isSuperAdminEmail(authHeader);
-
-    if (!isAdmin) {
-      return NextResponse.json({ error: 'Acesso não autorizado.' }, { status: 403 });
-    }
+    const guard = await requireSuperAdmin(req);
+    if (!guard.ok) return guard.response;
 
     const supabase = getServiceSupabase();
 
@@ -54,18 +53,14 @@ export async function GET(req: NextRequest) {
   } catch (err: any) {
     if (err?.digest?.startsWith('NEXT_')) throw err;
     console.error('[Admin Payments GET] Erro:', err);
-    return NextResponse.json({ error: err?.message || 'Erro interno' }, { status: 500 });
+    return NextResponse.json({ error: 'Erro interno ao listar pagamentos.' }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('x-user-email') || '';
-    const isAdmin = await isSuperAdminEmail(authHeader);
-
-    if (!isAdmin) {
-      return NextResponse.json({ error: 'Acesso não autorizado.' }, { status: 403 });
-    }
+    const guard = await requireSuperAdmin(req);
+    if (!guard.ok) return guard.response;
 
     const body = await req.json();
     const {
@@ -77,12 +72,37 @@ export async function POST(req: NextRequest) {
       extend_days = 30,
     } = body;
 
-    if (!tenant_id || !amount || !plan) {
+    if (!tenant_id || amount === undefined || amount === null || !plan) {
       return NextResponse.json({ error: 'Campos obrigatórios: tenant_id, amount, plan.' }, { status: 400 });
     }
 
-    const supabase = getServiceSupabase();
+    const numAmount = Number(amount);
+    if (!Number.isFinite(numAmount) || numAmount <= 0 || numAmount > 100000) {
+      return NextResponse.json({ error: 'Valor do pagamento inválido.' }, { status: 400 });
+    }
+    if (!VALID_PLANS.includes(plan)) {
+      return NextResponse.json({ error: 'Plano inválido.' }, { status: 400 });
+    }
+    if (!VALID_METHODS.includes(payment_method)) {
+      return NextResponse.json({ error: 'Forma de pagamento inválida.' }, { status: 400 });
+    }
+
     const numDays = Number(extend_days) || 30;
+    if (numDays < 1 || numDays > 366) {
+      return NextResponse.json({ error: 'extend_days deve estar entre 1 e 366.' }, { status: 400 });
+    }
+
+    const supabase = getServiceSupabase();
+
+    const { data: tenantExists } = await supabase
+      .from('xerb_tenants')
+      .select('id')
+      .eq('id', tenant_id)
+      .maybeSingle();
+    if (!tenantExists) {
+      return NextResponse.json({ error: 'Empresa não encontrada.' }, { status: 404 });
+    }
+
     const expiresAt = new Date(Date.now() + numDays * 24 * 60 * 60 * 1000).toISOString();
 
     // 1. Tenta inserir na tabela xerb_payments
@@ -92,13 +112,13 @@ export async function POST(req: NextRequest) {
         .from('xerb_payments')
         .insert({
           tenant_id,
-          amount: Number(amount),
+          amount: numAmount,
           plan,
           payment_method,
           status: 'confirmed',
           paid_at: new Date().toISOString(),
           expires_at: expiresAt,
-          notes,
+          notes: String(notes || '').slice(0, 500),
         })
         .select()
         .single();
@@ -111,10 +131,11 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Atualiza automaticamente a assinatura do cliente
+    const tenantPlan = plan === 'custom' ? 'business' : plan;
     const { data: updatedTenant, error: tenantUpdateErr } = await supabase
       .from('xerb_tenants')
       .update({
-        plan,
+        plan: tenantPlan,
         subscription_status: 'active',
         trial_ends_at: expiresAt,
         updated_at: new Date().toISOString(),
@@ -129,10 +150,10 @@ export async function POST(req: NextRequest) {
       success: true,
       payment: paymentRecord,
       tenant: updatedTenant,
-      message: `Assinatura do plano ${plan.toUpperCase()} ativada com sucesso por ${numDays} dias!`,
+      message: `Assinatura do plano ${String(plan).toUpperCase()} ativada com sucesso por ${numDays} dias!`,
     });
   } catch (err: any) {
     console.error('[Admin Payments POST] Erro:', err);
-    return NextResponse.json({ error: err?.message || 'Erro interno' }, { status: 500 });
+    return NextResponse.json({ error: 'Erro interno ao registrar pagamento.' }, { status: 500 });
   }
 }

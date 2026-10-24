@@ -29,65 +29,7 @@ export default function LoginPage() {
         throw new Error(error.message === 'Invalid login credentials' ? 'E-mail ou senha incorretos.' : error.message);
       }
 
-      // Localiza o tenant vinculado ao usuário (por user_id ou e-mail)
-      if (data.user?.id) {
-        const userEmail = data.user.email?.toLowerCase().trim();
-        let { data: tenant } = await supabase
-          .from('xerb_tenants')
-          .select('*')
-          .or(`user_id.eq.${data.user.id},email.eq.${userEmail}`)
-          .maybeSingle();
-
-        // Se o tenant existe mas ainda não tinha o user_id preenchido, atualiza
-        if (tenant && (!tenant.user_id || tenant.user_id !== data.user.id)) {
-          await supabase
-            .from('xerb_tenants')
-            .update({ user_id: data.user.id, updated_at: new Date().toISOString() })
-            .eq('id', tenant.id);
-        }
-
-        // Se o usuário veio de outro sistema (ex: GastroSys) e ainda não tem tenant no ERBots
-        if (!tenant && userEmail) {
-          const compName = data.user.user_metadata?.company_name || data.user.user_metadata?.full_name || 'Minha Empresa';
-          const isSuper = ['er.systems.br@gmail.com', 'seozefood@gmail.com'].includes(userEmail);
-          const slug = `${compName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Math.random().toString(36).substring(2, 6)}`;
-
-          const { data: newTenant } = await supabase
-            .from('xerb_tenants')
-            .insert({
-              user_id: data.user.id,
-              name: compName,
-              slug,
-              segment: 'Geral',
-              email: userEmail,
-              plan: isSuper ? 'business' : 'trial',
-              subscription_status: isSuper ? 'active' : 'trialing',
-              trial_ends_at: new Date(Date.now() + (isSuper ? 365 : 7) * 24 * 60 * 60 * 1000).toISOString(),
-              is_super_admin: isSuper,
-            })
-            .select()
-            .single();
-
-          if (newTenant) {
-            tenant = newTenant;
-            // Cria robô padrão
-            await supabase.from('xerb_bot_settings').insert({
-              tenant_id: newTenant.id,
-              bot_name: `Atendente da ${compName}`,
-              tone: 'friendly',
-              gemini_model: 'gemini-2.5-flash',
-              system_prompt: `Você é o atendente virtual inteligente da empresa ${compName}.`,
-              is_active: true,
-              human_handoff_enabled: true,
-            });
-          }
-        }
-
-        if (tenant?.id) {
-          localStorage.setItem('erbots_active_tenant_id', tenant.id);
-        }
-      }
-
+      // O vínculo/criação do tenant é feito no servidor (/api/tenant/bootstrap) ao abrir o dashboard
       router.push('/dashboard');
     } catch (err: any) {
       setErrorMsg(err?.message || 'Erro ao realizar login.');

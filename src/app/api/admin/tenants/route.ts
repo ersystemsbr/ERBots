@@ -1,17 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
-import { isSuperAdminEmail } from '@/lib/admin';
+import { requireSuperAdmin } from '@/lib/auth';
 
 export const maxDuration = 60;
 
+const VALID_PLANS = ['trial', 'start', 'pro', 'business'];
+const VALID_STATUS = ['trialing', 'active', 'past_due', 'canceled'];
+
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('x-user-email') || '';
-    const isAdmin = await isSuperAdminEmail(authHeader);
-
-    if (!isAdmin) {
-      return NextResponse.json({ error: 'Acesso não autorizado.' }, { status: 403 });
-    }
+    const guard = await requireSuperAdmin(req);
+    if (!guard.ok) return guard.response;
 
     const supabase = getServiceSupabase();
 
@@ -69,18 +68,14 @@ export async function GET(req: NextRequest) {
   } catch (err: any) {
     if (err?.digest?.startsWith('NEXT_')) throw err;
     console.error('[Admin Tenants GET] Erro:', err);
-    return NextResponse.json({ error: err?.message || 'Erro interno' }, { status: 500 });
+    return NextResponse.json({ error: 'Erro interno ao listar clientes.' }, { status: 500 });
   }
 }
 
 export async function PATCH(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('x-user-email') || '';
-    const isAdmin = await isSuperAdminEmail(authHeader);
-
-    if (!isAdmin) {
-      return NextResponse.json({ error: 'Acesso não autorizado.' }, { status: 403 });
-    }
+    const guard = await requireSuperAdmin(req);
+    if (!guard.ok) return guard.response;
 
     const body = await req.json();
     const {
@@ -96,8 +91,20 @@ export async function PATCH(req: NextRequest) {
       trial_ends_at,
     } = body;
 
-    if (!tenant_id) {
+    if (!tenant_id || typeof tenant_id !== 'string') {
       return NextResponse.json({ error: 'tenant_id é obrigatório.' }, { status: 400 });
+    }
+
+    if (plan !== undefined && plan !== null && plan !== '' && !VALID_PLANS.includes(plan)) {
+      return NextResponse.json({ error: 'Plano inválido.' }, { status: 400 });
+    }
+    if (
+      subscription_status !== undefined &&
+      subscription_status !== null &&
+      subscription_status !== '' &&
+      !VALID_STATUS.includes(subscription_status)
+    ) {
+      return NextResponse.json({ error: 'Status de assinatura inválido.' }, { status: 400 });
     }
 
     const supabase = getServiceSupabase();
@@ -105,24 +112,43 @@ export async function PATCH(req: NextRequest) {
       updated_at: new Date().toISOString(),
     };
 
-    if (name !== undefined) updatePayload.name = String(name).trim();
-    if (segment !== undefined) updatePayload.segment = String(segment).trim();
-    if (phone !== undefined) updatePayload.phone = String(phone).trim() || null;
-    if (email !== undefined) updatePayload.email = String(email).trim().toLowerCase() || null;
-    if (slug !== undefined) updatePayload.slug = String(slug).trim().toLowerCase();
+    if (name !== undefined) {
+      const clean = String(name).trim();
+      if (!clean || clean.length > 120) {
+        return NextResponse.json({ error: 'Nome da empresa inválido.' }, { status: 400 });
+      }
+      updatePayload.name = clean;
+    }
+    if (segment !== undefined) updatePayload.segment = String(segment).trim().slice(0, 80);
+    if (phone !== undefined) updatePayload.phone = String(phone).trim().slice(0, 30) || null;
+    if (email !== undefined) updatePayload.email = String(email).trim().toLowerCase().slice(0, 160) || null;
+    if (slug !== undefined) {
+      const cleanSlug = String(slug).toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 60);
+      if (!cleanSlug) {
+        return NextResponse.json({ error: 'Slug inválido.' }, { status: 400 });
+      }
+      updatePayload.slug = cleanSlug;
+    }
 
     if (plan) updatePayload.plan = plan;
     if (subscription_status) updatePayload.subscription_status = subscription_status;
 
     if (extend_trial_days) {
       const days = Number(extend_trial_days);
+      if (!Number.isFinite(days) || days < 1 || days > 366) {
+        return NextResponse.json({ error: 'extend_trial_days deve estar entre 1 e 366.' }, { status: 400 });
+      }
       const newExpiry = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
       updatePayload.trial_ends_at = newExpiry;
       if (subscription_status === undefined) {
         updatePayload.subscription_status = 'trialing';
       }
     } else if (trial_ends_at) {
-      updatePayload.trial_ends_at = trial_ends_at;
+      const parsed = new Date(trial_ends_at);
+      if (Number.isNaN(parsed.getTime())) {
+        return NextResponse.json({ error: 'trial_ends_at inválido.' }, { status: 400 });
+      }
+      updatePayload.trial_ends_at = parsed.toISOString();
     }
 
     const { data: updated, error: updateErr } = await supabase
@@ -132,11 +158,16 @@ export async function PATCH(req: NextRequest) {
       .select()
       .single();
 
-    if (updateErr) throw updateErr;
+    if (updateErr) {
+      if ((updateErr as any).code === '23505') {
+        return NextResponse.json({ error: 'Este slug já está em uso por outra empresa.' }, { status: 409 });
+      }
+      throw updateErr;
+    }
 
     return NextResponse.json({ success: true, tenant: updated });
   } catch (err: any) {
     console.error('[Admin Tenants PATCH] Erro:', err);
-    return NextResponse.json({ error: err?.message || 'Erro interno' }, { status: 500 });
+    return NextResponse.json({ error: 'Erro interno ao salvar dados da empresa.' }, { status: 500 });
   }
 }

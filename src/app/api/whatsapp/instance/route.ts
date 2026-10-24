@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
 import { createOrGetInstance, logoutInstance } from '@/lib/evolution';
+import { requireTenantAccess } from '@/lib/auth';
+import { buildWebhookUrl } from '@/lib/webhook';
 
 export const maxDuration = 60;
 
@@ -9,39 +11,31 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { tenant_id, action } = body;
 
-    if (!tenant_id) {
-      return NextResponse.json({ error: 'tenant_id é obrigatório' }, { status: 400 });
+    // Autenticação + autorização: apenas o dono do tenant (ou Super Admin)
+    const guard = await requireTenantAccess(req, tenant_id);
+    if (!guard.ok) return guard.response;
+    const tenant = guard.tenant;
+
+    if (!['CONNECT', 'STATUS', 'LOGOUT'].includes(action)) {
+      return NextResponse.json({ error: 'Ação inválida' }, { status: 400 });
     }
 
     const supabase = getServiceSupabase();
 
-    // 1. Busca dados do tenant
-    const { data: tenant, error: tenantErr } = await supabase
-      .from('xerb_tenants')
-      .select('id, name, slug')
-      .eq('id', tenant_id)
-      .single();
+    // Nome da instância ESTÁVEL: reaproveita o já cadastrado; para novas, deriva do ID (não do slug editável)
+    const { data: existingInstance } = await supabase
+      .from('xerb_instances')
+      .select('instance_name')
+      .eq('tenant_id', tenant.id)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
 
-    if (tenantErr || !tenant) {
-      return NextResponse.json({ error: 'Tenant não encontrado' }, { status: 404 });
-    }
-
-    const cleanSlug = (tenant.slug || tenant.id).toLowerCase().replace(/[^a-z0-9_-]/g, '');
-    const instanceName = `erbots_${cleanSlug}`;
-
-    // Determina a URL do webhook
-    const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || 'localhost:3000';
-    const proto = req.headers.get('x-forwarded-proto') || 'https';
-    let baseUrl = process.env.NEXT_PUBLIC_APP_URL || `${proto}://${host}`;
-
-    // Se estiver em localhost ou em erbots.com.br (que está em propagação no Registro.br),
-    // força o uso do domínio https://erbots.vercel.app para que a Evolution API nunca falhe com ENOTFOUND
-    if (!baseUrl || baseUrl.includes('localhost') || baseUrl.includes('erbots.com.br')) {
-      baseUrl = 'https://erbots.vercel.app';
-    }
-    const webhookUrl = `${baseUrl.replace(/\/+$/, '')}/api/webhook/whatsapp`;
+    const instanceName =
+      existingInstance?.instance_name || `erbots_${tenant.id.replace(/-/g, '').slice(0, 16)}`;
 
     if (action === 'CONNECT' || action === 'STATUS') {
+      const webhookUrl = buildWebhookUrl(req);
       const instanceState = await createOrGetInstance(instanceName, webhookUrl);
 
       // Atualiza ou insere na tabela xerb_instances
@@ -69,24 +63,21 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    if (action === 'LOGOUT') {
-      await logoutInstance(instanceName);
+    // LOGOUT
+    await logoutInstance(instanceName);
 
-      await supabase
-        .from('xerb_instances')
-        .update({
-          status: 'DISCONNECTED',
-          phone_connected: null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('instance_name', instanceName);
+    await supabase
+      .from('xerb_instances')
+      .update({
+        status: 'DISCONNECTED',
+        phone_connected: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('instance_name', instanceName);
 
-      return NextResponse.json({ success: true, status: 'DISCONNECTED' });
-    }
-
-    return NextResponse.json({ error: 'Ação inválida' }, { status: 400 });
+    return NextResponse.json({ success: true, status: 'DISCONNECTED' });
   } catch (err: any) {
     console.error('[API Instance] Erro:', err);
-    return NextResponse.json({ error: err?.message || 'Erro interno no servidor' }, { status: 500 });
+    return NextResponse.json({ error: 'Erro interno ao processar a conexão do WhatsApp.' }, { status: 500 });
   }
 }

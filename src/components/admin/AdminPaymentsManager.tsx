@@ -1,5 +1,7 @@
 'use client';
 
+import { authFetch } from '@/lib/api-client';
+
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   DollarSign,
@@ -89,9 +91,8 @@ export default function AdminPaymentsManager({
   const fetchPayments = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/payments', {
+      const res = await authFetch('/api/admin/payments', {
         headers: {
-          'x-user-email': userEmail,
         },
       });
       const data = await res.json();
@@ -156,11 +157,10 @@ export default function AdminPaymentsManager({
     setActionSuccess(null);
 
     try {
-      const res = await fetch('/api/admin/payments', {
+      const res = await authFetch('/api/admin/payments', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-user-email': userEmail,
         },
         body: JSON.stringify({
           tenant_id: selectedTenantId,

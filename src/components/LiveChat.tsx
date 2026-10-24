@@ -1,5 +1,7 @@
 'use client';
 
+import { authFetch } from '@/lib/api-client';
+
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { MessageSquare, Bot, User, Send, RefreshCw, UserCheck, CheckCircle2 } from 'lucide-react';
@@ -126,7 +128,7 @@ export default function LiveChat({ tenantId }: LiveChatProps) {
     setSending(true);
 
     try {
-      const res = await fetch('/api/whatsapp/send', {
+      const res = await authFetch('/api/whatsapp/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

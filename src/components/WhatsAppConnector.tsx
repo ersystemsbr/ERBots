@@ -1,5 +1,7 @@
 'use client';
 
+import { authFetch } from '@/lib/api-client';
+
 import React, { useState, useEffect } from 'react';
 import { QrCode, Smartphone, CheckCircle2, AlertCircle, RefreshCw, LogOut, Send, Zap } from 'lucide-react';
 
@@ -25,7 +27,7 @@ export default function WhatsAppConnector({ tenantId, tenantSlug, onStatusChange
     if (!tenantId) return;
     setLoading(true);
     try {
-      const res = await fetch('/api/whatsapp/instance', {
+      const res = await authFetch('/api/whatsapp/instance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tenant_id: tenantId, action }),
@@ -54,7 +56,7 @@ export default function WhatsAppConnector({ tenantId, tenantSlug, onStatusChange
     }
     setLoading(true);
     try {
-      const res = await fetch('/api/whatsapp/instance', {
+      const res = await authFetch('/api/whatsapp/instance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tenant_id: tenantId, action: 'LOGOUT' }),
@@ -80,7 +82,7 @@ export default function WhatsAppConnector({ tenantId, tenantSlug, onStatusChange
     setTestSending(true);
     setTestResult(null);
     try {
-      const res = await fetch('/api/whatsapp/send', {
+      const res = await authFetch('/api/whatsapp/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

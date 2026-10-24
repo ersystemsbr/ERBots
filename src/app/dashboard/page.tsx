@@ -10,7 +10,7 @@ import LiveChat from '@/components/LiveChat';
 import SubscriptionPlans from '@/components/SubscriptionPlans';
 import UserProfileManager from '@/components/UserProfileManager';
 import { supabase } from '@/lib/supabase';
-import { isDefaultAdmin } from '@/lib/admin';
+import { authFetch } from '@/lib/api-client';
 import { Loader2 } from 'lucide-react';
 
 export default function DashboardPage() {
@@ -25,96 +25,29 @@ export default function DashboardPage() {
     async function initTenant() {
       setLoading(true);
       try {
-        // 1. Tenta pegar o usuário autenticado
-        const { data: authData } = await supabase.auth.getUser();
-        const user = authData?.user;
-
-        let targetTenant: any = null;
-
-        if (user) {
-          const userEmail = user.email?.toLowerCase().trim() || '';
-          setIsSuperAdmin(isDefaultAdmin(userEmail));
-
-          // Busca tenant do usuário logado (por user_id ou e-mail cadastrado)
-          const { data: userTenant } = await supabase
-            .from('xerb_tenants')
-            .select('*')
-            .or(`user_id.eq.${user.id},email.eq.${userEmail}`)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-          if (userTenant) {
-            targetTenant = userTenant;
-            // Se o tenant existia sem user_id, vincula agora
-            if (!userTenant.user_id || userTenant.user_id !== user.id) {
-              await supabase
-                .from('xerb_tenants')
-                .update({ user_id: user.id, updated_at: new Date().toISOString() })
-                .eq('id', userTenant.id);
-            }
-          } else {
-            // Usuário autenticado no Supabase (ex: via GastroSys) acessando ERBots pela 1ª vez: auto-provisiona
-            const isSuper = isDefaultAdmin(userEmail);
-            const compName = user.user_metadata?.company_name || user.user_metadata?.full_name || (isSuper ? 'ER Systems' : 'Minha Empresa');
-            const slug = `${compName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Math.random().toString(36).substring(2, 6)}`;
-
-            const { data: createdTenant } = await supabase
-              .from('xerb_tenants')
-              .insert({
-                user_id: user.id,
-                name: compName,
-                slug,
-                segment: 'Geral',
-                email: userEmail,
-                plan: isSuper ? 'business' : 'trial',
-                subscription_status: isSuper ? 'active' : 'trialing',
-                trial_ends_at: new Date(Date.now() + (isSuper ? 365 : 7) * 24 * 60 * 60 * 1000).toISOString(),
-                is_super_admin: isSuper,
-              })
-              .select()
-              .single();
-
-            if (createdTenant) {
-              targetTenant = createdTenant;
-              // Cria robô padrão
-              await supabase.from('xerb_bot_settings').insert({
-                tenant_id: createdTenant.id,
-                bot_name: `Atendente da ${compName}`,
-                tone: 'friendly',
-                gemini_model: 'gemini-2.5-flash',
-                system_prompt: `Você é o atendente virtual inteligente da empresa ${compName}.`,
-                is_active: true,
-                human_handoff_enabled: true,
-              });
-            }
-          }
-        }
-
-        // 2. Se não autenticado, tenta o localStorage
-        if (!targetTenant) {
-          const cachedTenantId = typeof window !== 'undefined' ? localStorage.getItem('erbots_active_tenant_id') : null;
-          if (cachedTenantId) {
-            const { data: cachedTenant } = await supabase
-              .from('xerb_tenants')
-              .select('*')
-              .eq('id', cachedTenantId)
-              .maybeSingle();
-
-            if (cachedTenant) targetTenant = cachedTenant;
-          }
-        }
-
-        if (targetTenant) {
-          setTenant(targetTenant);
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('erbots_active_tenant_id', targetTenant.id);
-          }
-        } else {
-          // Se não há usuário logado nem tenant selecionado, vai para login
+        // 1. Exige sessão autenticada
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (!sessionData.session) {
           router.push('/login');
           return;
         }
+
+        // 2. O servidor localiza/vincula/cria o tenant do usuário (o navegador não decide plano/posse)
+        const res = await authFetch('/api/tenant/bootstrap', { method: 'POST' });
+        if (res.status === 401) {
+          router.push('/login');
+          return;
+        }
+
+        const data = await res.json();
+        if (!res.ok || !data.tenant) {
+          console.warn('Erro ao carregar conta:', data?.error);
+          router.push('/login');
+          return;
+        }
+
+        setIsSuperAdmin(Boolean(data.isSuperAdmin));
+        setTenant(data.tenant);
       } catch (err) {
         console.warn('Erro ao inicializar tenant no dashboard:', err);
       } finally {

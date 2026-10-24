@@ -1,5 +1,7 @@
 'use client';
 
+import { authFetch } from '@/lib/api-client';
+
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import {
@@ -92,14 +94,11 @@ export default function UserProfileManager({
 
     try {
       const finalSegment = segment === 'Outro' && customSegment.trim() ? customSegment.trim() : segment;
-      const { data: authData } = await supabase.auth.getUser();
-      const userEmail = authData?.user?.email || tenant?.email || '';
 
-      const res = await fetch('/api/tenant/profile', {
+      const res = await authFetch('/api/tenant/profile', {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          'x-user-email': userEmail,
         },
         body: JSON.stringify({
           tenant_id: tenant.id,
