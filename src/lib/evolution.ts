@@ -12,23 +12,16 @@ export async function getEvolutionConfig(): Promise<EvolutionConfig> {
   try {
     const supabase = getServiceSupabase();
 
-    // 1. Prioridade Máxima: busca direto em system_config (onde o tunnel_manager.py do Linux atualiza dinamicamente se o servidor reiniciar)
+    // 1. URL: prioridade para system_config.whatsapp_api_url (atualizada dinamicamente pelo tunnel_manager.py),
+    //    com fallback para xerb_system_config.evolution_api_url.
     const { data: dynUrl } = await supabase
       .from('system_config')
       .select('value')
       .eq('key', 'whatsapp_api_url')
       .maybeSingle();
 
-    const { data: dynKey } = await supabase
-      .from('system_config')
-      .select('value')
-      .eq('key', 'whatsapp_api_key')
-      .maybeSingle();
-
     if (dynUrl?.value) apiUrl = dynUrl.value;
-    if (dynKey?.value) apiKey = dynKey.value;
 
-    // 2. Busca em xerb_system_config se não tiver encontrado
     if (!apiUrl) {
       const { data: xerbUrl } = await supabase
         .from('xerb_system_config')
@@ -37,13 +30,24 @@ export async function getEvolutionConfig(): Promise<EvolutionConfig> {
         .maybeSingle();
       if (xerbUrl?.value) apiUrl = xerbUrl.value;
     }
+
+    // 2. API Key: prioridade para a tabela própria do ERBots (xerb_system_config.evolution_api_key),
+    //    com fallback para system_config.whatsapp_api_key.
+    const { data: xerbKey } = await supabase
+      .from('xerb_system_config')
+      .select('value')
+      .eq('key', 'evolution_api_key')
+      .maybeSingle();
+
+    if (xerbKey?.value) apiKey = xerbKey.value;
+
     if (!apiKey) {
-      const { data: xerbKey } = await supabase
-        .from('xerb_system_config')
+      const { data: dynKey } = await supabase
+        .from('system_config')
         .select('value')
-        .eq('key', 'evolution_api_key')
+        .eq('key', 'whatsapp_api_key')
         .maybeSingle();
-      if (xerbKey?.value) apiKey = xerbKey.value;
+      if (dynKey?.value) apiKey = dynKey.value;
     }
   } catch (err) {
     console.warn('[Evolution] Erro ao buscar configurações no Supabase:', err);
