@@ -82,10 +82,18 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
-                <Lock className="w-3.5 h-3.5 text-emerald-400" />
-                Sua Senha
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                  <Lock className="w-3.5 h-3.5 text-emerald-400" />
+                  Sua Senha
+                </label>
+                <Link
+                  href="/esqueci-senha"
+                  className="text-xs font-semibold text-emerald-400 hover:underline"
+                >
+                  Esqueceu sua senha?
+                </Link>
+              </div>
               <input
                 type="password"
                 required
@@ -112,6 +120,16 @@ export default function LoginPage() {
             Ainda não tem conta?{' '}
             <Link href="/cadastro" className="text-emerald-400 font-bold hover:underline">
               Testar Grátis por 7 Dias
+            </Link>
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-slate-800/80 flex items-center justify-center gap-4 text-[11px] text-slate-500">
+            <Link href="/termos" className="hover:text-slate-300 transition">
+              Termos de Uso
+            </Link>
+            <span>•</span>
+            <Link href="/privacidade" className="hover:text-slate-300 transition">
+              Privacidade (LGPD)
             </Link>
           </div>
         </div>

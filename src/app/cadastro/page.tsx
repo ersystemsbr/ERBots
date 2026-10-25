@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Bot, CheckCircle2, ArrowRight, ShieldCheck, Sparkles, Building2, User, Phone, Mail, Lock } from 'lucide-react';
+import { Bot, CheckCircle2, ArrowRight, Building2, User, Phone, Mail, Lock } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 export default function CadastroPage() {
@@ -17,10 +17,18 @@ export default function CadastroPage() {
   const [phone, setPhone] = useState<string>('');
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
+  const [website, setWebsite] = useState<string>(''); // Honeypot anti-bot
+  const [acceptedTerms, setAcceptedTerms] = useState<boolean>(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+
+    if (!acceptedTerms) {
+      setErrorMsg('Você precisa aceitar os Termos de Uso e a Política de Privacidade para criar sua conta.');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -34,6 +42,8 @@ export default function CadastroPage() {
           phone,
           email,
           password,
+          website,
+          acceptedTerms,
         }),
       });
 
@@ -80,7 +90,7 @@ export default function CadastroPage() {
           Comece seu Teste Grátis de 7 Dias
         </h2>
         <p className="mt-1 text-sm text-slate-400">
-          Crie seu atendente de WhatsApp com IA agora. Sem cartão de crédito.
+          Crie seu atendente de WhatsApp com IA já pré-treinado para o seu segmento. Sem cartão de crédito.
         </p>
       </div>
 
@@ -93,6 +103,20 @@ export default function CadastroPage() {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Honeypot oculto para bloquear robôs de spam */}
+            <div className="hidden" aria-hidden="true">
+              <label htmlFor="website">Website</label>
+              <input
+                id="website"
+                name="website"
+                type="text"
+                tabIndex={-1}
+                autoComplete="off"
+                value={website}
+                onChange={(e) => setWebsite(e.target.value)}
+              />
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
@@ -127,19 +151,19 @@ export default function CadastroPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Segmento de Atuação
+                  Segmento de Atuação (pré-treina sua IA)
                 </label>
                 <select
                   value={segment}
                   onChange={(e) => setSegment(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-emerald-500"
                 >
-                  <option value="Clínicas & Saúde">Clínicas, Consultórios & Saúde</option>
-                  <option value="Imobiliárias & Corretores">Imobiliárias & Corretores</option>
-                  <option value="Barbearias & Estética">Barbearias, Salões & Estética</option>
-                  <option value="Comércio & Lojas">Comércio, Lojas & Varejo</option>
-                  <option value="Escritórios & Serviços">Escritórios, Advocacia & Contábil</option>
-                  <option value="Pet Shop & Veterinária">Pet Shop & Clínicas Veterinárias</option>
+                  <option value="Clínicas & Saúde">Clínicas, Consultórios &amp; Saúde</option>
+                  <option value="Imobiliárias & Corretores">Imobiliárias &amp; Corretores</option>
+                  <option value="Barbearias & Estética">Barbearias, Salões &amp; Estética</option>
+                  <option value="Comércio & Lojas">Comércio, Lojas &amp; Varejo</option>
+                  <option value="Escritórios & Serviços">Escritórios, Advocacia &amp; Contábil</option>
+                  <option value="Pet Shop & Veterinária">Pet Shop &amp; Clínicas Veterinárias</option>
                   <option value="Outro">Outro Ramo</option>
                 </select>
               </div>
@@ -177,17 +201,40 @@ export default function CadastroPage() {
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
                 <Lock className="w-3.5 h-3.5 text-emerald-400" />
-                Senha de Acesso * (mínimo 6 caracteres)
+                Senha de Acesso * (mínimo 8 caracteres)
               </label>
               <input
                 type="password"
                 required
-                minLength={6}
+                minLength={8}
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-emerald-500"
               />
+            </div>
+
+            <div className="pt-1">
+              <label className="flex items-start gap-2.5 cursor-pointer text-xs text-slate-300 leading-relaxed">
+                <input
+                  type="checkbox"
+                  required
+                  checked={acceptedTerms}
+                  onChange={(e) => setAcceptedTerms(e.target.checked)}
+                  className="mt-0.5 rounded bg-slate-800 border-slate-700 text-emerald-500 focus:ring-emerald-500"
+                />
+                <span>
+                  Li e concordo com os{' '}
+                  <Link href="/termos" target="_blank" className="text-emerald-400 font-semibold hover:underline">
+                    Termos de Uso
+                  </Link>{' '}
+                  e com a{' '}
+                  <Link href="/privacidade" target="_blank" className="text-emerald-400 font-semibold hover:underline">
+                    Política de Privacidade (LGPD)
+                  </Link>
+                  .
+                </span>
+              </label>
             </div>
 
             <div className="pt-2">

@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { BookOpen, Plus, Trash2, Edit2, CheckCircle2, Sparkles, Filter } from 'lucide-react';
+import { SEGMENT_TEMPLATES, DEFAULT_TEMPLATES, KnowledgeTemplateItem } from '@/lib/segment-templates';
+import { BookOpen, Plus, Trash2, Edit2, Sparkles, X, CheckCircle2, AlertCircle } from 'lucide-react';
 
 interface KnowledgeItem {
   id: string;
@@ -14,12 +15,14 @@ interface KnowledgeItem {
 
 interface KnowledgeBaseManagerProps {
   tenantId: string;
+  tenantSegment?: string;
 }
 
-export default function KnowledgeBaseManager({ tenantId }: KnowledgeBaseManagerProps) {
+export default function KnowledgeBaseManager({ tenantId, tenantSegment }: KnowledgeBaseManagerProps) {
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [activeFilter, setActiveFilter] = useState<string>('all');
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Modal / Form state
   const [showForm, setShowForm] = useState<boolean>(false);
@@ -29,11 +32,23 @@ export default function KnowledgeBaseManager({ tenantId }: KnowledgeBaseManagerP
   const [content, setContent] = useState<string>('');
   const [saving, setSaving] = useState<boolean>(false);
 
+  // Modal de Modelos por Segmento
+  const segmentKeys = Object.keys(SEGMENT_TEMPLATES);
+  const [showTemplatesModal, setShowTemplatesModal] = useState<boolean>(false);
+  const [selectedSegment, setSelectedSegment] = useState<string>(
+    tenantSegment && SEGMENT_TEMPLATES[tenantSegment] ? tenantSegment : segmentKeys[0]
+  );
+
+  const showNotice = (type: 'success' | 'error', text: string) => {
+    setFeedback({ type, text });
+    setTimeout(() => setFeedback(null), 4000);
+  };
+
   const fetchItems = async () => {
     if (!tenantId) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('xerb_knowledge_base')
         .select('*')
         .eq('tenant_id', tenantId)
@@ -50,6 +65,12 @@ export default function KnowledgeBaseManager({ tenantId }: KnowledgeBaseManagerP
   useEffect(() => {
     fetchItems();
   }, [tenantId]);
+
+  useEffect(() => {
+    if (tenantSegment && SEGMENT_TEMPLATES[tenantSegment]) {
+      setSelectedSegment(tenantSegment);
+    }
+  }, [tenantSegment]);
 
   const handleOpenNew = () => {
     setEditingId(null);
@@ -70,24 +91,28 @@ export default function KnowledgeBaseManager({ tenantId }: KnowledgeBaseManagerP
   const handleDelete = async (id: string) => {
     if (!confirm('Deseja realmente excluir esta informação da base de conhecimento?')) return;
     try {
-      await supabase.from('xerb_knowledge_base').delete().eq('id', id);
+      const { error } = await supabase.from('xerb_knowledge_base').delete().eq('id', id);
+      if (error) throw error;
       setItems(items.filter((i) => i.id !== id));
-    } catch (err) {
-      alert('Erro ao excluir item.');
+      showNotice('success', 'Item removido da Base de Conhecimento.');
+    } catch {
+      showNotice('error', 'Erro ao excluir item.');
     }
   };
 
   const handleToggleActive = async (item: KnowledgeItem) => {
     try {
       const nextState = !item.is_active;
-      await supabase
+      const { error } = await supabase
         .from('xerb_knowledge_base')
         .update({ is_active: nextState })
         .eq('id', item.id);
+      if (error) throw error;
 
       setItems(items.map((i) => (i.id === item.id ? { ...i, is_active: nextState } : i)));
     } catch (err) {
       console.error('Erro ao alternar status:', err);
+      showNotice('error', 'Não foi possível alterar o status deste item.');
     }
   };
 
@@ -122,46 +147,43 @@ export default function KnowledgeBaseManager({ tenantId }: KnowledgeBaseManagerP
       }
 
       setShowForm(false);
-      fetchItems();
+      await fetchItems();
+      showNotice('success', editingId ? 'Informação atualizada com sucesso!' : 'Nova informação adicionada à IA!');
     } catch (err: any) {
-      alert(`Erro ao salvar: ${err?.message}`);
+      showNotice('error', `Erro ao salvar: ${err?.message || 'tente novamente'}`);
     } finally {
       setSaving(false);
     }
   };
 
-  const handleLoadDefaults = async () => {
-    if (!confirm('Deseja carregar perguntas frequentes padrão (Endereço, Pagamento, Horários)?')) return;
+  const handleImportSegmentTemplates = async (templates: KnowledgeTemplateItem[]) => {
     setSaving(true);
     try {
-      const defaultData = [
-        {
-          tenant_id: tenantId,
-          category: 'faq',
-          title: 'Formas de Pagamento Aceitas',
-          content: 'Aceitamos Pix com desconto de 5%, Cartão de Crédito em até 3x sem juros, Cartão de Débito e Dinheiro.',
-          is_active: true,
-        },
-        {
-          tenant_id: tenantId,
-          category: 'faq',
-          title: 'Endereço e Estacionamento',
-          content: 'Nosso endereço é Avenida Principal, nº 1000 - Centro. Possuímos estacionamento gratuito conveniado no local.',
-          is_active: true,
-        },
-        {
-          tenant_id: tenantId,
-          category: 'service',
-          title: 'Como agendar ou contratar',
-          content: 'Para agendar um atendimento ou solicitar orçamento, basta enviar seu nome e a data desejada que nossa equipe confirmará.',
-          is_active: true,
-        },
-      ];
+      const existingTitles = new Set(items.map((i) => i.title.trim().toLowerCase()));
+      const newOnes = templates.filter((t) => !existingTitles.has(t.title.trim().toLowerCase()));
 
-      await supabase.from('xerb_knowledge_base').insert(defaultData);
-      fetchItems();
-    } catch (err) {
-      alert('Erro ao carregar exemplos.');
+      if (newOnes.length === 0) {
+        showNotice('error', 'Todos os itens deste modelo já estão cadastrados na sua base.');
+        setShowTemplatesModal(false);
+        return;
+      }
+
+      const payload = newOnes.map((t) => ({
+        tenant_id: tenantId,
+        category: t.category,
+        title: t.title,
+        content: t.content,
+        is_active: true,
+      }));
+
+      const { error } = await supabase.from('xerb_knowledge_base').insert(payload);
+      if (error) throw error;
+
+      setShowTemplatesModal(false);
+      await fetchItems();
+      showNotice('success', `${newOnes.length} modelo(s) importado(s)! Personalize os textos com seus dados reais.`);
+    } catch (err: any) {
+      showNotice('error', `Erro ao importar modelos: ${err?.message || 'tente novamente'}`);
     } finally {
       setSaving(false);
     }
@@ -172,8 +194,27 @@ export default function KnowledgeBaseManager({ tenantId }: KnowledgeBaseManagerP
     return item.category === activeFilter;
   });
 
+  const previewTemplates = SEGMENT_TEMPLATES[selectedSegment] || DEFAULT_TEMPLATES;
+
   return (
     <div className="space-y-6">
+      {feedback && (
+        <div
+          className={`rounded-xl border px-4 py-3 flex items-center gap-2.5 text-sm ${
+            feedback.type === 'success'
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+              : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+          }`}
+        >
+          {feedback.type === 'success' ? (
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+          ) : (
+            <AlertCircle className="w-4 h-4 shrink-0" />
+          )}
+          <span>{feedback.text}</span>
+        </div>
+      )}
+
       {/* Top Banner */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-6 border-b border-slate-800">
@@ -187,17 +228,15 @@ export default function KnowledgeBaseManager({ tenantId }: KnowledgeBaseManagerP
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
-            {items.length === 0 && (
-              <button
-                onClick={handleLoadDefaults}
-                disabled={saving}
-                className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl border border-slate-700 transition"
-              >
-                <Sparkles className="w-4 h-4 text-amber-400" />
-                Carregar Exemplos
-              </button>
-            )}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setShowTemplatesModal(true)}
+              disabled={saving}
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 transition"
+            >
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              Modelos por Segmento
+            </button>
 
             <button
               onClick={handleOpenNew}
@@ -243,14 +282,22 @@ export default function KnowledgeBaseManager({ tenantId }: KnowledgeBaseManagerP
           <BookOpen className="w-12 h-12 text-slate-600 mx-auto mb-3" />
           <h3 className="text-md font-bold text-white">Nenhum item cadastrado nesta categoria</h3>
           <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1 mb-4">
-            Adicione respostas para as perguntas mais comuns dos seus clientes para a IA responder na hora.
+            Adicione respostas para as perguntas mais comuns dos seus clientes ou importe modelos prontos do seu ramo.
           </p>
-          <button
-            onClick={handleOpenNew}
-            className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-semibold hover:bg-emerald-500/20 transition"
-          >
-            <Plus className="w-3.5 h-3.5" /> Adicionar Primeira Informação
-          </button>
+          <div className="flex flex-wrap justify-center gap-2">
+            <button
+              onClick={() => setShowTemplatesModal(true)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-800 text-amber-300 border border-slate-700 rounded-xl text-xs font-semibold hover:bg-slate-700 transition"
+            >
+              <Sparkles className="w-3.5 h-3.5" /> Importar Modelos Prontos
+            </button>
+            <button
+              onClick={handleOpenNew}
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-semibold hover:bg-emerald-500/20 transition"
+            >
+              <Plus className="w-3.5 h-3.5" /> Adicionar Manualmente
+            </button>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -302,6 +349,83 @@ export default function KnowledgeBaseManager({ tenantId }: KnowledgeBaseManagerP
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Modal de Modelos por Segmento */}
+      {showTemplatesModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-2xl w-full shadow-2xl space-y-4 max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div>
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-amber-400" />
+                  Modelos Prontos por Segmento
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Escolha seu ramo para importar cartões prontos e depois edite apenas seus preços e endereço.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowTemplatesModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                Selecione o Segmento
+              </label>
+              <select
+                value={selectedSegment}
+                onChange={(e) => setSelectedSegment(e.target.value)}
+                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-emerald-500"
+              >
+                {segmentKeys.map((seg) => (
+                  <option key={seg} value={seg}>
+                    {seg}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
+              {previewTemplates.map((tpl, idx) => (
+                <div
+                  key={idx}
+                  className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white">{tpl.title}</span>
+                    <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-400">
+                      {tpl.category}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">{tpl.content}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowTemplatesModal(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => handleImportSegmentTemplates(previewTemplates)}
+                className="px-5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold rounded-xl transition disabled:opacity-50"
+              >
+                {saving ? 'Importando...' : `Importar ${previewTemplates.length} Modelos`}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

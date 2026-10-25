@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { Bot, MessageSquare, Settings, BookOpen, ShieldCheck, LogOut, Building2 } from 'lucide-react';
+import { Bot, MessageSquare, Settings, BookOpen, ShieldCheck, LogOut, Building2, BarChart3 } from 'lucide-react';
 
 interface NavbarProps {
   currentTab: string;
@@ -24,6 +24,7 @@ export default function Navbar({
   const navItems = [
     { id: 'whatsapp', label: 'Conexão WhatsApp', icon: Bot },
     { id: 'chat', label: 'Live Chat', icon: MessageSquare },
+    { id: 'analytics', label: 'Resultados', icon: BarChart3 },
     { id: 'bot-settings', label: 'Personalizar IA', icon: Settings },
     { id: 'knowledge', label: 'Base de Conhecimento', icon: BookOpen },
     { id: 'plans', label: 'Planos & Assinatura', icon: ShieldCheck },

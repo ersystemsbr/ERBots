@@ -13,25 +13,27 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://www.erbots.com.br"),
   title: {
     default: "ERBots | Atendentes Virtuais Inteligentes no WhatsApp",
     template: "%s | ERBots",
   },
-  description: "Automatize o atendimento no WhatsApp da sua empresa com inteligência artificial humanizada 24h por dia, integração ágil e transbordo inteligente.",
+  description:
+    "Automatize o atendimento no WhatsApp da sua empresa 24h por dia com IA humanizada que entende texto, áudio e fotos, Live Chat em tempo real e transbordo inteligente.",
   keywords: [
     "atendente virtual whatsapp",
-    "bot whatsapp",
+    "automação whatsapp ia",
     "inteligencia artificial whatsapp",
-    "saas whatsapp",
+    "chatbot whatsapp empresas",
     "erbots",
-    "atendimento 24h",
-    "evolution api",
+    "atendimento automatico 24h",
   ],
-  authors: [{ name: "ERBots" }],
+  authors: [{ name: "ERBots — ER Systems" }],
   openGraph: {
     title: "ERBots | Atendentes Virtuais Inteligentes no WhatsApp",
-    description: "Automatize o atendimento no WhatsApp da sua empresa com inteligência artificial humanizada 24 horas por dia.",
-    url: "https://erbots.com.br",
+    description:
+      "Automatize o atendimento no WhatsApp da sua empresa 24h por dia com IA humanizada que entende texto, áudio e fotos.",
+    url: "https://www.erbots.com.br",
     siteName: "ERBots",
     locale: "pt_BR",
     type: "website",

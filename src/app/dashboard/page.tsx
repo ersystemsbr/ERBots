@@ -9,6 +9,8 @@ import KnowledgeBaseManager from '@/components/KnowledgeBaseManager';
 import LiveChat from '@/components/LiveChat';
 import SubscriptionPlans from '@/components/SubscriptionPlans';
 import UserProfileManager from '@/components/UserProfileManager';
+import AnalyticsDashboard from '@/components/AnalyticsDashboard';
+import OnboardingChecklist from '@/components/OnboardingChecklist';
 import { supabase } from '@/lib/supabase';
 import { authFetch } from '@/lib/api-client';
 import { getAccessState } from '@/lib/plans';
@@ -199,6 +201,14 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {tenantId && (
+          <OnboardingChecklist
+            tenantId={tenantId}
+            isConnected={isConnected}
+            onNavigateTab={setCurrentTab}
+          />
+        )}
+
         {currentTab === 'whatsapp' && (
           <WhatsAppConnector
             tenantId={tenantId}
@@ -212,9 +222,15 @@ export default function DashboardPage() {
 
         {currentTab === 'chat' && <LiveChat tenantId={tenantId} />}
 
+        {currentTab === 'analytics' && (
+          <AnalyticsDashboard tenantId={tenantId} onNavigateTab={setCurrentTab} />
+        )}
+
         {currentTab === 'bot-settings' && <BotSettingsForm tenantId={tenantId} />}
 
-        {currentTab === 'knowledge' && <KnowledgeBaseManager tenantId={tenantId} />}
+        {currentTab === 'knowledge' && (
+          <KnowledgeBaseManager tenantId={tenantId} tenantSegment={tenant?.segment} />
+        )}
 
         {currentTab === 'plans' && (
           <SubscriptionPlans tenant={tenant} onTenantUpdated={setTenant} />
