@@ -34,7 +34,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       serviceRoleKey: {
         configured: Boolean(serviceKey),
-        validRole: jwtRole(serviceKey) === 'service_role',
+        // Aceita o formato legado (JWT com role service_role) e o novo (sb_secret_...)
+        validRole: jwtRole(serviceKey) === 'service_role' || Boolean(serviceKey?.startsWith('sb_secret_')),
       },
       webhookSecretConfigured: isWebhookSecretConfigured(),
       evolutionConfigured: Boolean(evo.apiUrl && evo.apiKey),
