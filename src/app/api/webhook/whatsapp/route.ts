@@ -12,7 +12,7 @@ import { processAIMessage, transcribeMedia, CapturedLead } from '@/lib/ai/gemini
 import { verifyWebhookToken } from '@/lib/webhook';
 import { checkAiGate, recordUsage } from '@/lib/billing/usage';
 import { getAddonsConfig, getPlansConfig } from '@/lib/billing/plans-config';
-import { currentUsagePeriod, formatBRL, getPlan } from '@/lib/plans';
+import { currentUsagePeriod, formatBRL, getPlan, computeAnnualPricing } from '@/lib/plans';
 import { logSystemEvent } from '@/lib/monitoring';
 
 export const maxDuration = 60;
@@ -666,7 +666,34 @@ export async function POST(req: NextRequest) {
       is_active: true,
       human_handoff_enabled: true,
     };
-    const knowledgeBase = kbRes.data || [];
+    const rawKb = kbRes.data || [];
+    let knowledgeBase = rawKb;
+
+    // Se for o bot oficial da ER Systems (Super Admin), garante sincronização dinâmica dos planos com plans_config
+    if (tenant.is_super_admin) {
+      const discount = (await getAddonsConfig()).annualDiscountPercent || 20;
+      knowledgeBase = rawKb.map((item: any) => {
+        if (item.title === 'Plano Start') {
+          return {
+            ...item,
+            content: `Ideal para autônomos, consultórios e pequenos negócios. Valor: ${formatBRL(plansCfg.start.price)}/mês (ou ${formatBRL(computeAnnualPricing(plansCfg.start.price, discount).monthlyEquivalent)}/mês no plano anual com ${discount}% OFF). Inclui: 1 conexão de WhatsApp, até ${plansCfg.start.monthlyAiReplies.toLocaleString('pt-BR')} respostas de IA por mês, atendente IA Gemini 24/7, base de conhecimento (FAQ e serviços), personalização de tom de voz, horário de atendimento e suporte via WhatsApp.`
+          };
+        }
+        if (item.title === 'Plano Pro') {
+          return {
+            ...item,
+            content: `O mais escolhido por empresas que buscam automação e controle. Valor: ${formatBRL(plansCfg.pro.price)}/mês (ou ${formatBRL(computeAnnualPricing(plansCfg.pro.price, discount).monthlyEquivalent)}/mês no plano anual com ${discount}% OFF). Inclui: 1 conexão de WhatsApp, até ${plansCfg.pro.monthlyAiReplies.toLocaleString('pt-BR')} respostas de IA por mês, base de conhecimento ilimitada, transbordo humano inteligente, Live Chat / CRM em tempo real, histórico completo e suporte prioritário.`
+          };
+        }
+        if (item.title === 'Plano Business') {
+          return {
+            ...item,
+            content: `Para empresas maiores, clínicas de alto fluxo e operações intensas. Valor: ${formatBRL(plansCfg.business.price)}/mês (ou ${formatBRL(computeAnnualPricing(plansCfg.business.price, discount).monthlyEquivalent)}/mês no plano anual com ${discount}% OFF). Inclui: 1 conexão de WhatsApp, até ${plansCfg.business.monthlyAiReplies.toLocaleString('pt-BR')} respostas de IA por mês, IA com ajuste fino de prompts complexos, transbordo com roteamento de equipe, treinamento e setup assistido, e gerente de contas dedicado.`
+          };
+        }
+        return item;
+      });
+    }
 
     // 3.3 Portão de monetização (assinatura/trial vigente + limite mensal do plano)
     const gate = await checkAiGate(supabase, tenant);

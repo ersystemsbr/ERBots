@@ -8,7 +8,8 @@ import {
   saveAddonsConfig,
   savePlanOverrides,
 } from '@/lib/billing/plans-config';
-import { PLANS } from '@/lib/plans';
+import { PLANS, formatBRL, computeAnnualPricing } from '@/lib/plans';
+import { getServiceSupabase } from '@/lib/supabase';
 
 export const maxDuration = 30;
 
@@ -53,6 +54,40 @@ export async function PUT(req: NextRequest) {
     }
 
     const [plans, addons] = await Promise.all([getPlansConfig(true), getAddonsConfig(true)]);
+
+    // Sincroniza a base de conhecimento do super admin com os novos planos
+    try {
+      const db = getServiceSupabase();
+      const { data: superAdmins } = await db.from('xerb_tenants').select('id').eq('is_super_admin', true);
+      if (superAdmins && superAdmins.length) {
+        const discount = addons.annualDiscountPercent || 20;
+        const kbUpdates = [
+          {
+            title: 'Plano Start',
+            content: `Ideal para autônomos, consultórios e pequenos negócios. Valor: ${formatBRL(plans.start.price)}/mês (ou ${formatBRL(computeAnnualPricing(plans.start.price, discount).monthlyEquivalent)}/mês no plano anual com ${discount}% OFF). Inclui: 1 conexão de WhatsApp, até ${plans.start.monthlyAiReplies.toLocaleString('pt-BR')} respostas de IA por mês, atendente IA Gemini 24/7, base de conhecimento (FAQ e serviços), personalização de tom de voz, horário de atendimento e suporte via WhatsApp.`
+          },
+          {
+            title: 'Plano Pro',
+            content: `O mais escolhido por empresas que buscam automação e controle. Valor: ${formatBRL(plans.pro.price)}/mês (ou ${formatBRL(computeAnnualPricing(plans.pro.price, discount).monthlyEquivalent)}/mês no plano anual com ${discount}% OFF). Inclui: 1 conexão de WhatsApp, até ${plans.pro.monthlyAiReplies.toLocaleString('pt-BR')} respostas de IA por mês, base de conhecimento ilimitada, transbordo humano inteligente, Live Chat / CRM em tempo real, histórico completo e suporte prioritário.`
+          },
+          {
+            title: 'Plano Business',
+            content: `Para empresas maiores, clínicas de alto fluxo e operações intensas. Valor: ${formatBRL(plans.business.price)}/mês (ou ${formatBRL(computeAnnualPricing(plans.business.price, discount).monthlyEquivalent)}/mês no plano anual com ${discount}% OFF). Inclui: 1 conexão de WhatsApp, até ${plans.business.monthlyAiReplies.toLocaleString('pt-BR')} respostas de IA por mês, IA com ajuste fino de prompts complexos, transbordo com roteamento de equipe, treinamento e setup assistido, e gerente de contas dedicado.`
+          }
+        ];
+        for (const adminTenant of superAdmins) {
+          for (const item of kbUpdates) {
+            await db.from('xerb_knowledge_base')
+              .update({ content: item.content })
+              .eq('tenant_id', adminTenant.id)
+              .eq('title', item.title);
+          }
+        }
+      }
+    } catch (syncErr) {
+      console.warn('[Admin Plans PUT] Falha ao sincronizar KB do super admin:', syncErr);
+    }
+
     return NextResponse.json({ success: true, plans, addons });
   } catch (err: any) {
     console.error('[Admin Plans PUT] Erro:', err);

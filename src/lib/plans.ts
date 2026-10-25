@@ -83,7 +83,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
   start: {
     id: 'start',
     name: 'Start',
-    price: 149,
+    price: 24.9,
     monthlyAiReplies: 1000,
     maxInstances: 1,
     description: 'Ideal para autônomos, consultórios e pequenos negócios.',
@@ -98,7 +98,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
   pro: {
     id: 'pro',
     name: 'Pro',
-    price: 249,
+    price: 44.9,
     monthlyAiReplies: 3000,
     maxInstances: 1,
     description: 'O mais escolhido por empresas que buscam automação e controle.',
@@ -114,7 +114,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
   business: {
     id: 'business',
     name: 'Business',
-    price: 449,
+    price: 64.9,
     monthlyAiReplies: 10000,
     maxInstances: 1,
     description: 'Para empresas maiores, clínicas de alto fluxo e operações intensas.',
