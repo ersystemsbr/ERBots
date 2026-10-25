@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
     const tid = guard.tenant.id;
     const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-    const [tenantRes, convsRes, msgsRes, kbRes, botRes, instRes, usage, plansMap] = await Promise.all([
+    const [tenantRes, convsRes, msgsRes, kbRes, botRes, instRes, leadsRes, usage, plansMap] = await Promise.all([
       supabase.from('xerb_tenants').select('plan').eq('id', tid).maybeSingle(),
       supabase
         .from('xerb_conversations')
@@ -58,12 +58,20 @@ export async function GET(req: NextRequest) {
         .eq('is_active', true),
       supabase.from('xerb_bot_settings').select('bot_name, system_prompt, is_active').eq('tenant_id', tid).maybeSingle(),
       supabase.from('xerb_instances').select('status').eq('tenant_id', tid).maybeSingle(),
+      supabase
+        .from('xerb_leads')
+        .select('id, conversation_id, customer_name, customer_phone, remote_jid, interest, preferred_slot, notes, status, created_at, updated_at')
+        .eq('tenant_id', tid)
+        .gte('created_at', sinceIso)
+        .order('created_at', { ascending: false })
+        .limit(100),
       getUsage(supabase, tid),
       getPlansConfig(),
     ]);
 
     const convs = convsRes.data || [];
     const msgs = msgsRes.data || [];
+    const qualifiedLeads = leadsRes.error ? [] : leadsRes.data || [];
 
     const totalConversations = convs.length;
     const humanHandoffCount = convs.filter((c) => c.handling_status === 'HUMAN').length;
@@ -140,12 +148,15 @@ export async function GET(req: NextRequest) {
         messagesHuman,
         afterHoursReplies,
         estimatedHoursSaved,
+        qualifiedLeadsCount: qualifiedLeads.length,
+        wonLeadsCount: qualifiedLeads.filter((l: any) => l.status === 'won').length,
         monthlyAiUsed: usage.ai_replies,
         monthlyAiLimit: planDef.monthlyAiReplies,
         planName: planDef.name,
       },
       dailySeries,
       hourlyDistribution,
+      qualifiedLeads,
       recentLeads: convs.slice(0, 20),
       onboarding: {
         botConfigured: Boolean(bot?.bot_name && bot?.system_prompt),

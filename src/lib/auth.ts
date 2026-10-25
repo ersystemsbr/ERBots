@@ -94,7 +94,20 @@ export async function requireTenantAccess(
   req: NextRequest,
   tenantId: string | undefined | null
 ): Promise<
-  | { ok: true; ctx: AuthContext; tenant: { id: string; name: string; slug: string; phone: string | null; user_id: string | null } }
+  | {
+      ok: true;
+      ctx: AuthContext;
+      tenant: {
+        id: string;
+        name: string;
+        slug: string;
+        phone: string | null;
+        user_id: string | null;
+        plan?: string | null;
+        is_super_admin?: boolean | null;
+        segment?: string | null;
+      };
+    }
   | { ok: false; response: NextResponse }
 > {
   const ctx = await authenticate(req);
@@ -107,7 +120,7 @@ export async function requireTenantAccess(
   const supabase = getServiceSupabase();
   const { data: tenant } = await supabase
     .from('xerb_tenants')
-    .select('id, name, slug, phone, user_id')
+    .select('id, name, slug, phone, user_id, plan, is_super_admin, segment')
     .eq('id', tenantId)
     .maybeSingle();
 

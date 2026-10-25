@@ -3,6 +3,8 @@ import { requireTenantAccess } from '@/lib/auth';
 import { getServiceSupabase } from '@/lib/supabase';
 import { processAIMessage } from '@/lib/ai/gemini';
 import { checkAiGate, recordUsage } from '@/lib/billing/usage';
+import { getPlansConfig } from '@/lib/billing/plans-config';
+import { getPlan } from '@/lib/plans';
 import { checkRateLimit } from '@/lib/rate-limit';
 
 export const maxDuration = 45;
@@ -31,7 +33,7 @@ export async function POST(req: NextRequest) {
 
     const supabase = getServiceSupabase();
 
-    const [tenantRes, botRes, kbRes] = await Promise.all([
+    const [tenantRes, botRes, kbRes, plansCfg] = await Promise.all([
       supabase
         .from('xerb_tenants')
         .select('id, name, segment, plan, subscription_status, trial_ends_at, is_super_admin')
@@ -43,6 +45,7 @@ export async function POST(req: NextRequest) {
         .select('category, title, content')
         .eq('tenant_id', tid)
         .eq('is_active', true),
+      getPlansConfig(),
     ]);
 
     const tenant = tenantRes.data;
@@ -84,8 +87,10 @@ export async function POST(req: NextRequest) {
           }))
       : [];
 
+    const planPrice = getPlan(tenant.plan, plansCfg).price;
+
     const aiResult = await processAIMessage({
-      tenant,
+      tenant: { ...tenant, planPrice },
       botSettings,
       knowledgeBase: kbRes.data || [],
       conversationHistory: safeHistory,
@@ -105,6 +110,7 @@ export async function POST(req: NextRequest) {
       reply: aiResult.reply,
       triggerHandoff: Boolean(aiResult.triggerHandoff),
       isOutOfHours: Boolean(aiResult.isOutOfHours),
+      capturedLead: aiResult.capturedLead || null,
     });
   } catch (err: any) {
     if (err?.digest?.startsWith('NEXT_')) throw err;

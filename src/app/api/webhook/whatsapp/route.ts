@@ -8,9 +8,11 @@ import {
   tryReconnectInstance,
   findHealthyNotifierInstance,
 } from '@/lib/evolution';
-import { processAIMessage, transcribeMedia } from '@/lib/ai/gemini';
+import { processAIMessage, transcribeMedia, CapturedLead } from '@/lib/ai/gemini';
 import { verifyWebhookToken } from '@/lib/webhook';
 import { checkAiGate, recordUsage } from '@/lib/billing/usage';
+import { getPlansConfig } from '@/lib/billing/plans-config';
+import { getPlan } from '@/lib/plans';
 import { logSystemEvent } from '@/lib/monitoring';
 
 export const maxDuration = 60;
@@ -187,35 +189,148 @@ async function isOwnEcho(db: Db, conversationId: string, text: string): Promise<
 }
 
 // ---------------------------------------------------------------------------
-// Aviso ao dono quando um cliente precisa de atendimento humano
+// Registro de Oportunidades (xerb_leads) e avisos ao dono no WhatsApp
 // ---------------------------------------------------------------------------
-async function notifyOwnerOfHandoff(args: {
+async function persistCapturedLead(
+  db: Db,
+  params: {
+    tenantId: string;
+    conversationId: string;
+    customerName: string;
+    cleanPhone: string;
+    remoteJid: string;
+    lead: CapturedLead;
+  }
+): Promise<{ saved: boolean; shouldNotify: boolean }> {
+  try {
+    const sinceIso = new Date(Date.now() - 2 * HOUR_MS).toISOString();
+    const nowIso = new Date().toISOString();
+
+    const { data: existing, error: selErr } = await db
+      .from('xerb_leads')
+      .select('id, customer_name, interest, preferred_slot, notes')
+      .eq('tenant_id', params.tenantId)
+      .eq('conversation_id', params.conversationId)
+      .gte('created_at', sinceIso)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (selErr) {
+      console.warn('[Webhook] Aviso ao consultar xerb_leads:', selErr.message);
+      return { saved: false, shouldNotify: false };
+    }
+
+    const finalName =
+      params.lead.customerName || params.customerName || params.cleanPhone;
+
+    if (existing) {
+      const changed =
+        existing.interest !== params.lead.interest ||
+        Boolean(params.lead.preferredSlot && existing.preferred_slot !== params.lead.preferredSlot);
+
+      await db
+        .from('xerb_leads')
+        .update({
+          customer_name: finalName || existing.customer_name,
+          customer_phone: params.cleanPhone,
+          interest: params.lead.interest,
+          preferred_slot: params.lead.preferredSlot || existing.preferred_slot || null,
+          notes: params.lead.notes || existing.notes || null,
+          updated_at: nowIso,
+        })
+        .eq('id', existing.id);
+
+      return { saved: true, shouldNotify: changed };
+    }
+
+    const { error: insErr } = await db.from('xerb_leads').insert({
+      tenant_id: params.tenantId,
+      conversation_id: params.conversationId,
+      customer_name: finalName,
+      customer_phone: params.cleanPhone,
+      remote_jid: params.remoteJid,
+      interest: params.lead.interest,
+      preferred_slot: params.lead.preferredSlot || null,
+      notes: params.lead.notes || null,
+      status: 'new',
+    });
+
+    if (insErr) {
+      console.warn('[Webhook] Erro ao inserir em xerb_leads:', insErr.message);
+      return { saved: false, shouldNotify: false };
+    }
+    return { saved: true, shouldNotify: true };
+  } catch (err) {
+    console.warn('[Webhook] Exceção ao registrar lead:', err);
+    return { saved: false, shouldNotify: false };
+  }
+}
+
+async function notifyOwner(args: {
   instanceName: string;
   tenant: { phone?: string | null; alert_phone?: string | null; name?: string | null };
   customerName: string;
   customerPhone: string;
   lastMessage: string;
+  handoff: boolean;
+  lead?: CapturedLead;
 }) {
   try {
     const owner = normalizeBrPhone(args.tenant.alert_phone) || normalizeBrPhone(args.tenant.phone);
     if (!owner || samePhone(owner, args.customerPhone)) return;
 
     const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://www.erbots.com.br').replace(/\/+$/, '');
-    const preview = args.lastMessage.length > 220 ? `${args.lastMessage.slice(0, 220)}…` : args.lastMessage;
-    const phoneDisplay = args.customerPhone.startsWith('LID:') ? args.customerPhone : `+${args.customerPhone}`;
-    const lines = [
-      '🔔 *ERBots – atendimento humano solicitado*',
-      '',
-      `Cliente: *${args.customerName || args.customerPhone}* (${phoneDisplay})`,
-      `Última mensagem: "${preview}"`,
-      '',
-      'A IA está pausada nesta conversa. Responda direto pelo WhatsApp' +
-        ` ou pelo painel: ${appUrl}/dashboard`,
-      `(Se ninguém responder em ${HUMAN_TIMEOUT_HOURS}h, a IA volta a atender sozinha.)`,
-    ];
-    await sendTextMessage(args.instanceName, owner, lines.join('\n'));
+    const isLid = args.customerPhone.startsWith('LID:');
+    const phoneDigits = args.customerPhone.replace(/\D/g, '');
+    const phoneDisplay = isLid ? args.customerPhone : `+${phoneDigits || args.customerPhone}`;
+    const waLink = !isLid && phoneDigits.length >= 10 ? `https://wa.me/${phoneDigits}` : '';
+    const displayName = args.lead?.customerName || args.customerName || args.customerPhone;
+
+    if (args.lead) {
+      const header = args.handoff
+        ? '🎯 *ERBots – Oportunidade + Confirmação Humana*'
+        : '🎯 *ERBots – Nova Oportunidade Capturada*';
+
+      const lines = [
+        header,
+        '',
+        `👤 Cliente: *${displayName}* (${phoneDisplay})`,
+        `💼 Interesse: *${args.lead.interest}*`,
+      ];
+      if (args.lead.preferredSlot) lines.push(`📅 Preferência: *${args.lead.preferredSlot}*`);
+      if (args.lead.notes) lines.push(`📝 Obs: ${args.lead.notes}`);
+      if (waLink) lines.push('', `📲 Chamar com 1 clique: ${waLink}`);
+      if (args.handoff) {
+        lines.push(
+          '',
+          `⏸️ A IA pausou nesta conversa para sua confirmação (retoma sozinha após ${HUMAN_TIMEOUT_HOURS}h sem resposta).`
+        );
+      }
+      lines.push(`📊 Painel: ${appUrl}/dashboard`);
+
+      await sendTextMessage(args.instanceName, owner, lines.join('\n'));
+      return;
+    }
+
+    if (args.handoff) {
+      const preview = args.lastMessage.length > 220 ? `${args.lastMessage.slice(0, 220)}…` : args.lastMessage;
+      const lines = [
+        '🔔 *ERBots – atendimento humano solicitado*',
+        '',
+        `Cliente: *${displayName}* (${phoneDisplay})`,
+        `Última mensagem: "${preview}"`,
+      ];
+      if (waLink) lines.push(`📲 Chamar com 1 clique: ${waLink}`);
+      lines.push(
+        '',
+        `A IA está pausada nesta conversa. Responda direto pelo WhatsApp ou pelo painel: ${appUrl}/dashboard`,
+        `(Se ninguém responder em ${HUMAN_TIMEOUT_HOURS}h, a IA volta a atender sozinha.)`
+      );
+      await sendTextMessage(args.instanceName, owner, lines.join('\n'));
+    }
   } catch (err) {
-    console.warn('[Webhook] Falha ao avisar o dono sobre o transbordo:', err);
+    console.warn('[Webhook] Falha ao avisar o dono:', err);
   }
 }
 
@@ -511,8 +626,8 @@ export async function POST(req: NextRequest) {
     const tenantId = instanceRow.tenant_id;
     const { remoteJid, contactPhone: cleanPhone } = parseWhatsAppAddress(key, data);
 
-    // Busca dados do tenant, bot_settings e knowledge_base
-    const [tenantRes, botSettingsRes, kbRes] = await Promise.all([
+    // Busca dados do tenant, bot_settings, knowledge_base e tabela de planos vigente
+    const [tenantRes, botSettingsRes, kbRes, plansCfg] = await Promise.all([
       supabase
         .from('xerb_tenants')
         .select('id, name, segment, phone, alert_phone, plan, subscription_status, trial_ends_at, is_super_admin')
@@ -520,6 +635,7 @@ export async function POST(req: NextRequest) {
         .single(),
       supabase.from('xerb_bot_settings').select('*').eq('tenant_id', tenantId).maybeSingle(),
       supabase.from('xerb_knowledge_base').select('category, title, content').eq('tenant_id', tenantId).eq('is_active', true),
+      getPlansConfig(),
     ]);
 
     const tenant = tenantRes.data;
@@ -772,8 +888,9 @@ export async function POST(req: NextRequest) {
     }
 
     // 9. Processa a resposta com o motor de IA do ERBots
+    const planPrice = getPlan(tenant.plan, plansCfg).price;
     const aiResult = await processAIMessage({
-      tenant,
+      tenant: { ...tenant, planPrice },
       botSettings,
       knowledgeBase,
       conversationHistory: history,
@@ -841,7 +958,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, replied: false, reason: 'send_failed' });
     }
 
-    // 11. Atualiza o status da conversa (transbordo → modo humano + aviso ao dono)
+    // 11. Atualiza o status da conversa + registra oportunidade (xerb_leads) + avisa o dono
     const newStatus = aiResult.triggerHandoff ? 'HUMAN' : 'AI';
     await supabase
       .from('xerb_conversations')
@@ -853,13 +970,28 @@ export async function POST(req: NextRequest) {
       })
       .eq('id', conversation.id);
 
-    if (aiResult.triggerHandoff) {
-      await notifyOwnerOfHandoff({
+    let shouldNotifyLead = false;
+    if (aiResult.capturedLead) {
+      const leadRes = await persistCapturedLead(supabase, {
+        tenantId,
+        conversationId: conversation.id,
+        customerName: pushName || conversation.contact_name || '',
+        cleanPhone,
+        remoteJid,
+        lead: aiResult.capturedLead,
+      });
+      shouldNotifyLead = leadRes.shouldNotify;
+    }
+
+    if (aiResult.triggerHandoff || shouldNotifyLead) {
+      await notifyOwner({
         instanceName,
         tenant,
         customerName: pushName || conversation.contact_name || '',
         customerPhone: cleanPhone,
         lastMessage: incomingBlock,
+        handoff: Boolean(aiResult.triggerHandoff),
+        lead: shouldNotifyLead ? aiResult.capturedLead : undefined,
       });
     }
 
@@ -867,6 +999,7 @@ export async function POST(req: NextRequest) {
       success: true,
       replied: true,
       handoff: Boolean(aiResult.triggerHandoff),
+      leadCaptured: Boolean(aiResult.capturedLead),
     });
   } catch (err: any) {
     await logSystemEvent({

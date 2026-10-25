@@ -25,6 +25,12 @@ interface SimMsg {
   sender: 'user' | 'ai';
   content: string;
   handoff?: boolean;
+  capturedLead?: {
+    customerName?: string;
+    interest: string;
+    preferredSlot?: string;
+    notes?: string;
+  } | null;
 }
 
 export default function OnboardingChecklist({
@@ -134,7 +140,12 @@ export default function OnboardingChecklist({
       } else {
         setSimMessages((prev) => [
           ...prev,
-          { sender: 'ai', content: data.reply || '(sem resposta)', handoff: data.triggerHandoff },
+          {
+            sender: 'ai',
+            content: data.reply || '(sem resposta)',
+            handoff: data.triggerHandoff,
+            capturedLead: data.capturedLead || null,
+          },
         ]);
         setSimulatorTested(true);
         if (typeof window !== 'undefined') {
@@ -336,10 +347,20 @@ export default function OnboardingChecklist({
                       }`}
                     >
                       <p className="whitespace-pre-line leading-relaxed">{m.content}</p>
-                      {m.handoff && (
-                        <span className="mt-2 inline-block px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold">
-                          🔔 Transbordo humano acionado
-                        </span>
+                      {(m.handoff || m.capturedLead) && (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {m.capturedLead && (
+                            <span className="inline-block px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold">
+                              🎯 Lead captado: {m.capturedLead.interest}
+                              {m.capturedLead.preferredSlot ? ` (${m.capturedLead.preferredSlot})` : ''}
+                            </span>
+                          )}
+                          {m.handoff && (
+                            <span className="inline-block px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold">
+                              🔔 Transbordo humano acionado
+                            </span>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>

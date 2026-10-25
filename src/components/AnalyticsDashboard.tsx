@@ -14,6 +14,9 @@ import {
   UserCheck,
   TrendingUp,
   ArrowUpRight,
+  Target,
+  ExternalLink,
+  Trash2,
 } from 'lucide-react';
 
 interface AnalyticsProps {
@@ -21,10 +24,33 @@ interface AnalyticsProps {
   onNavigateTab?: (tab: string) => void;
 }
 
+type LeadStatus = 'new' | 'contacted' | 'won' | 'lost';
+
+const LEAD_STATUS_META: Record<LeadStatus, { label: string; badge: string }> = {
+  new: {
+    label: 'Novo',
+    badge: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+  },
+  contacted: {
+    label: 'Em Contato',
+    badge: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
+  },
+  won: {
+    label: 'Fechado 💰',
+    badge: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+  },
+  lost: {
+    label: 'Perdido',
+    badge: 'bg-slate-800 text-slate-400 border-slate-700',
+  },
+};
+
 export default function AnalyticsDashboard({ tenantId, onNavigateTab }: AnalyticsProps) {
   const [days, setDays] = useState<7 | 30 | 90>(30);
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [leadFilter, setLeadFilter] = useState<'all' | LeadStatus>('all');
+  const [updatingLeadId, setUpdatingLeadId] = useState<string | null>(null);
 
   const loadAnalytics = useCallback(async () => {
     if (!tenantId) return;
@@ -44,6 +70,91 @@ export default function AnalyticsDashboard({ tenantId, onNavigateTab }: Analytic
   useEffect(() => {
     loadAnalytics();
   }, [loadAnalytics]);
+
+  const handleUpdateLeadStatus = async (leadId: string, nextStatus: LeadStatus) => {
+    setUpdatingLeadId(leadId);
+    try {
+      const res = await authFetch('/api/tenant/leads', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          id: leadId,
+          status: nextStatus,
+        }),
+      });
+      if (res.ok) {
+        setData((prev: any) => {
+          if (!prev) return prev;
+          const updatedList = (prev.qualifiedLeads || []).map((l: any) =>
+            l.id === leadId ? { ...l, status: nextStatus } : l
+          );
+          return {
+            ...prev,
+            qualifiedLeads: updatedList,
+            summary: {
+              ...(prev.summary || {}),
+              wonLeadsCount: updatedList.filter((l: any) => l.status === 'won').length,
+            },
+          };
+        });
+      }
+    } catch (err) {
+      console.error('Erro ao atualizar status da oportunidade:', err);
+    } finally {
+      setUpdatingLeadId(null);
+    }
+  };
+
+  const handleDeleteLead = async (leadId: string) => {
+    if (!confirm('Remover esta oportunidade da lista?')) return;
+    try {
+      const res = await authFetch(
+        `/api/tenant/leads?tenant_id=${encodeURIComponent(tenantId)}&id=${encodeURIComponent(leadId)}`,
+        { method: 'DELETE' }
+      );
+      if (res.ok) {
+        setData((prev: any) => {
+          if (!prev) return prev;
+          const updatedList = (prev.qualifiedLeads || []).filter((l: any) => l.id !== leadId);
+          return {
+            ...prev,
+            qualifiedLeads: updatedList,
+            summary: {
+              ...(prev.summary || {}),
+              qualifiedLeadsCount: updatedList.length,
+              wonLeadsCount: updatedList.filter((l: any) => l.status === 'won').length,
+            },
+          };
+        });
+      }
+    } catch (err) {
+      console.error('Erro ao remover oportunidade:', err);
+    }
+  };
+
+  const handleExportQualifiedCsv = () => {
+    const qLeads: any[] = data?.qualifiedLeads || [];
+    if (!qLeads.length) return;
+    const header = ['Cliente', 'WhatsApp', 'Interesse', 'Preferencia_Horario', 'Observacoes', 'Status', 'Data_Hora'];
+    const rows = qLeads.map((l: any) => [
+      `"${String(l.customer_name || '').replace(/"/g, '""')}"`,
+      `"${String(l.customer_phone || '').replace(/"/g, '""')}"`,
+      `"${String(l.interest || '').replace(/\r?\n/g, ' ').replace(/"/g, '""')}"`,
+      `"${String(l.preferred_slot || '').replace(/\r?\n/g, ' ').replace(/"/g, '""')}"`,
+      `"${String(l.notes || '').replace(/\r?\n/g, ' ').replace(/"/g, '""')}"`,
+      `"${LEAD_STATUS_META[(l.status as LeadStatus) || 'new']?.label || l.status}"`,
+      `"${l.created_at ? new Date(l.created_at).toLocaleString('pt-BR') : ''}"`,
+    ]);
+    const csv = '\uFEFF' + [header.join(';'), ...rows.map((r: string[]) => r.join(';'))].join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `oportunidades_ia_erbots_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const handleExportCsv = () => {
     const leads = data?.recentLeads || [];
@@ -70,6 +181,9 @@ export default function AnalyticsDashboard({ tenantId, onNavigateTab }: Analytic
   const daily: Array<{ date: string; label: string; conversations: number; aiReplies: number }> =
     data?.dailySeries || [];
   const hourly: Array<{ hour: number; label: string; count: number }> = data?.hourlyDistribution || [];
+  const qualifiedLeads: any[] = data?.qualifiedLeads || [];
+  const filteredQualified =
+    leadFilter === 'all' ? qualifiedLeads : qualifiedLeads.filter((l) => (l.status || 'new') === leadFilter);
   const leads: any[] = data?.recentLeads || [];
 
   const maxDaily = Math.max(1, ...daily.map((d) => Math.max(d.aiReplies, d.conversations)));
@@ -89,7 +203,7 @@ export default function AnalyticsDashboard({ tenantId, onNavigateTab }: Analytic
             Resultados &amp; Desempenho da IA
           </h2>
           <p className="text-sm text-slate-400 mt-0.5">
-            Acompanhe quantas conversas sua atendente virtual resolveu, leads captados e tempo economizado.
+            Acompanhe quantas conversas sua atendente virtual resolveu, oportunidades captadas e tempo economizado.
           </p>
         </div>
 
@@ -119,7 +233,20 @@ export default function AnalyticsDashboard({ tenantId, onNavigateTab }: Analytic
       </div>
 
       {/* Cards de KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
+        <div className="bg-slate-900 border border-emerald-500/30 rounded-2xl p-4 sm:p-5">
+          <div className="flex items-center justify-between text-xs text-emerald-300 font-semibold">
+            <span>Oportunidades IA</span>
+            <Target className="w-4 h-4 text-emerald-400" />
+          </div>
+          <div className="mt-2 text-2xl font-extrabold text-emerald-400">
+            {summary.qualifiedLeadsCount ?? 0}
+          </div>
+          <span className="text-[11px] text-slate-400">
+            {summary.wonLeadsCount ? `${summary.wonLeadsCount} fechada(s) 💰` : `Últimos ${days} dias`}
+          </span>
+        </div>
+
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5">
           <div className="flex items-center justify-between text-xs text-slate-400">
             <span>Conversas Ativas</span>
@@ -134,7 +261,7 @@ export default function AnalyticsDashboard({ tenantId, onNavigateTab }: Analytic
             <span>Respostas da IA</span>
             <Bot className="w-4 h-4 text-teal-400" />
           </div>
-          <div className="mt-2 text-2xl font-extrabold text-emerald-400">{summary.messagesAi ?? 0}</div>
+          <div className="mt-2 text-2xl font-extrabold text-teal-300">{summary.messagesAi ?? 0}</div>
           <span className="text-[11px] text-slate-500">
             {summary.messagesIn ?? 0} msgs recebidas
           </span>
@@ -160,7 +287,7 @@ export default function AnalyticsDashboard({ tenantId, onNavigateTab }: Analytic
           <span className="text-[11px] text-slate-500">Noite e fins de semana</span>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 col-span-2 lg:col-span-1">
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5">
           <div className="flex items-center justify-between text-xs text-slate-400">
             <span>Tempo Economizado</span>
             <Clock className="w-4 h-4 text-amber-400" />
@@ -201,6 +328,169 @@ export default function AnalyticsDashboard({ tenantId, onNavigateTab }: Analytic
             Gerenciar plano
             <ArrowUpRight className="w-3.5 h-3.5" />
           </button>
+        )}
+      </div>
+
+      {/* Oportunidades & Pré-Agendamentos Capturados pela IA (xerb_leads) */}
+      <div className="bg-slate-900 border border-emerald-500/25 rounded-2xl p-6 space-y-4 shadow-lg">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+              <Target className="w-4 h-4 text-emerald-400" />
+              Oportunidades &amp; Pré-Agendamentos Capturados pela IA
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Clientes que demonstraram intenção real de compra, orçamento ou agendamento (com alerta enviado ao seu WhatsApp).
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {(
+              [
+                { id: 'all', label: 'Todos' },
+                { id: 'new', label: 'Novos' },
+                { id: 'contacted', label: 'Em Contato' },
+                { id: 'won', label: 'Fechados' },
+                { id: 'lost', label: 'Perdidos' },
+              ] as const
+            ).map((f) => (
+              <button
+                key={f.id}
+                onClick={() => setLeadFilter(f.id)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition ${
+                  leadFilter === f.id
+                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                    : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+
+            {qualifiedLeads.length > 0 && (
+              <button
+                onClick={handleExportQualifiedCsv}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[11px] font-semibold text-slate-200 transition"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-400" />
+                CSV
+              </button>
+            )}
+          </div>
+        </div>
+
+        {filteredQualified.length === 0 ? (
+          <div className="py-8 text-center text-xs text-slate-400 bg-slate-950/40 rounded-xl border border-slate-800/60">
+            {qualifiedLeads.length === 0
+              ? 'Assim que um cliente informar serviço/produto desejado ou pedir orçamento/agendamento no WhatsApp, a oportunidade aparecerá automaticamente aqui.'
+              : 'Nenhuma oportunidade neste filtro.'}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-slate-800 text-slate-400">
+                  <th className="py-2.5 pr-4 font-semibold">Cliente</th>
+                  <th className="py-2.5 pr-4 font-semibold">Interesse / Serviço</th>
+                  <th className="py-2.5 pr-4 font-semibold">Preferência / Obs.</th>
+                  <th className="py-2.5 pr-4 font-semibold">Status</th>
+                  <th className="py-2.5 pr-4 font-semibold">Data</th>
+                  <th className="py-2.5 font-semibold text-right">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60">
+                {filteredQualified.map((ql) => {
+                  const status = ((ql.status as LeadStatus) || 'new') in LEAD_STATUS_META
+                    ? (ql.status as LeadStatus)
+                    : 'new';
+                  const digits = String(ql.customer_phone || '').replace(/\D/g, '');
+                  const canWa = !String(ql.customer_phone || '').startsWith('LID:') && digits.length >= 10;
+
+                  return (
+                    <tr key={ql.id} className="hover:bg-slate-800/30">
+                      <td className="py-3 pr-4">
+                        <div className="font-semibold text-white">{ql.customer_name || 'Cliente'}</div>
+                        <div className="font-mono text-[11px] text-slate-400">{ql.customer_phone}</div>
+                      </td>
+                      <td className="py-3 pr-4 font-semibold text-emerald-300 max-w-[220px]">
+                        {ql.interest}
+                      </td>
+                      <td className="py-3 pr-4 text-slate-300 max-w-[240px]">
+                        {ql.preferred_slot && (
+                          <div className="text-xs text-amber-200 font-medium">📅 {ql.preferred_slot}</div>
+                        )}
+                        {ql.notes && <div className="text-[11px] text-slate-400 truncate">{ql.notes}</div>}
+                        {!ql.preferred_slot && !ql.notes && <span className="text-slate-600">—</span>}
+                      </td>
+                      <td className="py-3 pr-4">
+                        <select
+                          value={status}
+                          disabled={updatingLeadId === ql.id}
+                          onChange={(e) => handleUpdateLeadStatus(ql.id, e.target.value as LeadStatus)}
+                          className={`rounded-lg px-2.5 py-1 text-[11px] font-bold border focus:outline-none cursor-pointer ${LEAD_STATUS_META[status].badge}`}
+                        >
+                          <option value="new" className="bg-slate-900 text-slate-100">
+                            Novo
+                          </option>
+                          <option value="contacted" className="bg-slate-900 text-slate-100">
+                            Em Contato
+                          </option>
+                          <option value="won" className="bg-slate-900 text-slate-100">
+                            Fechado 💰
+                          </option>
+                          <option value="lost" className="bg-slate-900 text-slate-100">
+                            Perdido
+                          </option>
+                        </select>
+                      </td>
+                      <td className="py-3 pr-4 font-mono text-slate-400 whitespace-nowrap">
+                        {ql.created_at
+                          ? new Date(ql.created_at).toLocaleString('pt-BR', {
+                              day: '2-digit',
+                              month: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })
+                          : '—'}
+                      </td>
+                      <td className="py-3 text-right whitespace-nowrap">
+                        <div className="inline-flex items-center gap-1.5">
+                          {canWa ? (
+                            <a
+                              href={`https://wa.me/${digits}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-[11px] font-semibold text-emerald-300 transition"
+                              title="Abrir conversa no WhatsApp"
+                            >
+                              WhatsApp
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          ) : (
+                            onNavigateTab && (
+                              <button
+                                onClick={() => onNavigateTab('chat')}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-300 transition"
+                              >
+                                Live Chat
+                              </button>
+                            )
+                          )}
+                          <button
+                            onClick={() => handleDeleteLead(ql.id)}
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition"
+                            title="Remover oportunidade"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
@@ -285,9 +575,9 @@ export default function AnalyticsDashboard({ tenantId, onNavigateTab }: Analytic
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h3 className="text-sm font-bold text-white">Contatos &amp; Leads Recentes</h3>
+            <h3 className="text-sm font-bold text-white">Contatos &amp; Conversas Recentes</h3>
             <p className="text-xs text-slate-400">
-              Clientes que conversaram com seu WhatsApp recentemente
+              Todos os clientes que conversaram com seu WhatsApp recentemente
             </p>
           </div>
 
