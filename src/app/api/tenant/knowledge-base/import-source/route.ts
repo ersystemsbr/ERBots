@@ -257,7 +257,7 @@ export async function POST(req: NextRequest) {
     const supabase = getServiceSupabase();
     const { data: tenantRow } = await supabase
       .from('xerb_tenants')
-      .select('id, name, segment, plan, subscription_status, trial_ends_at, is_super_admin')
+      .select('id, name, segment, plan, subscription_status, trial_ends_at, is_super_admin, extra_ai_credits')
       .eq('id', tid)
       .single();
 
@@ -308,6 +308,7 @@ export async function POST(req: NextRequest) {
         aiReplies: 1,
         tokensIn: extracted.tokensIn,
         tokensOut: extracted.tokensOut,
+        consumeExtraCredit: Boolean(gate.usingExtraCredits),
       });
     }
 

@@ -309,6 +309,7 @@ export default function AnalyticsDashboard({ tenantId, onNavigateTab }: Analytic
             </span>
             <span className="font-mono text-slate-300">
               {summary.monthlyAiUsed ?? 0} / {summary.monthlyAiLimit ?? 0} respostas IA ({usagePct}%)
+              {summary.extraAiCredits > 0 ? ` • +${summary.extraAiCredits} reserva` : ''}
             </span>
           </div>
           <div className="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800">

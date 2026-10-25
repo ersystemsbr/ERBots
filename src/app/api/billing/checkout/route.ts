@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
 import { requireTenantAccess } from '@/lib/auth';
-import { isPaidPlan, isValidCpfCnpj, onlyDigits } from '@/lib/plans';
-import { getPlansConfig } from '@/lib/billing/plans-config';
+import {
+  computeAnnualPricing,
+  isPaidPlan,
+  isValidCpfCnpj,
+  onlyDigits,
+  type BillingInterval,
+} from '@/lib/plans';
+import { getAddonsConfig, getPlansConfig } from '@/lib/billing/plans-config';
 import {
   AsaasError,
   cancelSubscription,
@@ -15,16 +21,17 @@ import {
 export const maxDuration = 60;
 
 /**
- * Inicia a contratação ou troca de plano:
+ * Inicia a contratação ou troca de plano (Mensal ou Anual com desconto):
  * - Cria/atualiza o cliente no Asaas;
- * - NÃO cancela uma assinatura ativa antes da confirmação do novo pagamento (evita perder o plano se desistir no checkout);
- * - Grava `erbots:<tenantId>:<plan>` no `externalReference` para validação exata no webhook;
- * - Salva `pending_invoice_url` para abrir direto mesmo em navegadores mobile que bloqueiam pop-up.
+ * - NÃO cancela uma assinatura ativa antes da confirmação do novo pagamento;
+ * - Grava `erbots:<tenantId>:<plan>:<monthly|yearly>` no `externalReference`;
+ * - Salva `pending_invoice_url` para abrir direto mesmo em celulares que bloqueiam pop-up.
  */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { tenant_id, plan, cpf_cnpj } = body;
+    const interval: BillingInterval = body.interval === 'yearly' ? 'yearly' : 'monthly';
 
     const guard = await requireTenantAccess(req, tenant_id);
     if (!guard.ok) return guard.response;
@@ -55,10 +62,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Informe um CPF ou CNPJ válido para emitir a cobrança.' }, { status: 400 });
     }
 
+    const currentInterval: BillingInterval = tenant.billing_interval === 'yearly' ? 'yearly' : 'monthly';
     const hasActivePaidSub = Boolean(tenant.subscription_status === 'active' && tenant.billing_subscription_id);
 
-    if (hasActivePaidSub && tenant.plan === plan) {
-      return NextResponse.json({ error: 'Você já possui este plano ativo.' }, { status: 409 });
+    if (hasActivePaidSub && tenant.plan === plan && currentInterval === interval) {
+      return NextResponse.json({ error: 'Você já possui este plano e ciclo de cobrança ativos.' }, { status: 409 });
     }
 
     // 1. Cliente no gateway
@@ -78,13 +86,19 @@ export async function POST(req: NextRequest) {
       await cancelSubscription(tenant.billing_subscription_id).catch(() => {});
     }
 
-    // 3. Nova assinatura com referência explícita do plano contratado
-    const def = (await getPlansConfig())[plan];
+    // 3. Nova assinatura mensal ou anual
+    const [plansCfg, addonsCfg] = await Promise.all([getPlansConfig(), getAddonsConfig()]);
+    const def = plansCfg[plan];
+    const annualPricing = computeAnnualPricing(def.price, addonsCfg.annualDiscountPercent);
+    const chargeValue = interval === 'yearly' ? annualPricing.yearlyTotal : def.price;
+    const cycleLabel = interval === 'yearly' ? 'anual' : 'mensal';
+
     const subscription = await createSubscription({
       customerId,
-      value: def.price,
-      description: `ERBots - Plano ${def.name} (mensal)`,
-      externalReference: `erbots:${tenant.id}:${plan}`,
+      value: chargeValue,
+      cycle: interval === 'yearly' ? 'YEARLY' : 'MONTHLY',
+      description: `ERBots - Plano ${def.name} (${cycleLabel})`,
+      externalReference: `erbots:${tenant.id}:${plan}:${interval}`,
     });
 
     // Aguarda a primeira cobrança ser gerada para obter o link da fatura
@@ -94,12 +108,12 @@ export async function POST(req: NextRequest) {
       if (!invoiceUrl) await new Promise((r) => setTimeout(r, 800));
     }
 
-    // Se já tem assinatura ativa, mantém billing_subscription_id intacto e guarda a nova em pending_*
     const updateData: Record<string, any> = {
       cpf_cnpj: doc,
       billing_customer_id: customerId,
       pending_subscription_id: subscription.id,
       pending_plan: plan,
+      pending_interval: interval,
       pending_invoice_url: invoiceUrl,
       updated_at: new Date().toISOString(),
     };
@@ -107,6 +121,7 @@ export async function POST(req: NextRequest) {
     if (!hasActivePaidSub) {
       updateData.billing_subscription_id = subscription.id;
       updateData.billing_plan = plan;
+      updateData.billing_interval = interval;
     }
 
     const { error: updErr } = await supabase
@@ -129,7 +144,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return NextResponse.json({ success: true, invoiceUrl, plan });
+    return NextResponse.json({ success: true, invoiceUrl, plan, interval, value: chargeValue });
   } catch (err: any) {
     if (err instanceof AsaasError) {
       console.error('[Billing Checkout] Asaas:', err.message);

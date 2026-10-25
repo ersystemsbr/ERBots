@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
     const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
     const [tenantRes, convsRes, msgsRes, kbRes, botRes, instRes, leadsRes, usage, plansMap] = await Promise.all([
-      supabase.from('xerb_tenants').select('plan').eq('id', tid).maybeSingle(),
+      supabase.from('xerb_tenants').select('plan, extra_ai_credits').eq('id', tid).maybeSingle(),
       supabase
         .from('xerb_conversations')
         .select('id, contact_name, contact_phone, handling_status, last_message, last_message_at, created_at')
@@ -152,6 +152,7 @@ export async function GET(req: NextRequest) {
         wonLeadsCount: qualifiedLeads.filter((l: any) => l.status === 'won').length,
         monthlyAiUsed: usage.ai_replies,
         monthlyAiLimit: planDef.monthlyAiReplies,
+        extraAiCredits: Number(tenantRes.data?.extra_ai_credits) || 0,
         planName: planDef.name,
       },
       dailySeries,

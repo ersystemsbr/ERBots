@@ -1,9 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { timingSafeEqual } from 'crypto';
 import { getServiceSupabase } from '@/lib/supabase';
-import { BILLING_PERIOD_DAYS, isPaidPlan, type PaidPlanId, type PlanDefinition, type PlanId } from '@/lib/plans';
-import { getPlansConfig } from '@/lib/billing/plans-config';
+import {
+  ANNUAL_BILLING_PERIOD_DAYS,
+  BILLING_PERIOD_DAYS,
+  computeAnnualPricing,
+  isPaidPlan,
+  type BillingInterval,
+  type CommercialAddons,
+  type PaidPlanId,
+  type PlanDefinition,
+  type PlanId,
+} from '@/lib/plans';
+import { getAddonsConfig, getPlansConfig } from '@/lib/billing/plans-config';
 import { cancelSubscription } from '@/lib/billing/asaas';
+import { addExtraCredits } from '@/lib/billing/usage';
 
 export const maxDuration = 30;
 
@@ -31,35 +42,78 @@ function mapMethod(billingType?: string): string {
   }
 }
 
-function parseExternalRef(raw?: string | null): { tenantId: string | null; planId: PaidPlanId | null } {
-  if (!raw) return { tenantId: null, planId: null };
+type ParsedRef =
+  | {
+      kind: 'topup';
+      tenantId: string;
+      topupReplies: number;
+      expectedPrice: number;
+    }
+  | {
+      kind: 'subscription';
+      tenantId: string | null;
+      planId: PaidPlanId | null;
+      interval: BillingInterval | null;
+    };
+
+function parseExternalRef(raw?: string | null): ParsedRef {
+  if (!raw) return { kind: 'subscription', tenantId: null, planId: null, interval: null };
   const trimmed = String(raw).trim();
-  const m = /^erbots:([0-9a-f-]{36}):([a-z0-9_-]+)$/i.exec(trimmed);
-  if (m) {
-    const p = m[2].toLowerCase();
-    return { tenantId: m[1], planId: isPaidPlan(p) ? p : null };
+
+  const topupMatch = /^erbots_topup:([0-9a-f-]{36}):(\d+)(?::([0-9.]+))?$/i.exec(trimmed);
+  if (topupMatch) {
+    return {
+      kind: 'topup',
+      tenantId: topupMatch[1],
+      topupReplies: Math.max(0, Number(topupMatch[2]) || 0),
+      expectedPrice: Number(topupMatch[3]) || 0,
+    };
   }
+
+  const subMatch = /^erbots:([0-9a-f-]{36}):([a-z0-9_-]+)(?::(monthly|yearly))?$/i.exec(trimmed);
+  if (subMatch) {
+    const p = subMatch[2].toLowerCase();
+    const rawInt = subMatch[3]?.toLowerCase();
+    return {
+      kind: 'subscription',
+      tenantId: subMatch[1],
+      planId: isPaidPlan(p) ? p : null,
+      interval: rawInt === 'yearly' ? 'yearly' : rawInt === 'monthly' ? 'monthly' : null,
+    };
+  }
+
   if (/^[0-9a-f-]{36}$/i.test(trimmed)) {
-    return { tenantId: trimmed, planId: null };
+    return { kind: 'subscription', tenantId: trimmed, planId: null, interval: null };
   }
-  return { tenantId: null, planId: null };
+
+  return { kind: 'subscription', tenantId: null, planId: null, interval: null };
 }
 
 /**
- * Determina o plano pago com proteção contra divergência de valor (ex.: boleto antigo Start pago após iniciar Business).
+ * Determina o plano e o ciclo (mensal/anual) pagos com proteção contra divergência de valor.
  */
 function resolveVerifiedPlan(args: {
   tenant: any;
   plans: Record<PlanId, PlanDefinition>;
+  addons: CommercialAddons;
   subId?: string | null;
   refPlan?: PaidPlanId | null;
+  refInterval?: BillingInterval | null;
   paidValue?: number;
-}): PaidPlanId | null {
-  const { tenant, plans, subId, refPlan, paidValue } = args;
+}): { plan: PaidPlanId; interval: BillingInterval } | null {
+  const { tenant, plans, addons, subId, refPlan, refInterval, paidValue } = args;
   const amount = Number(paidValue) || 0;
   const paidPlans = (Object.values(plans) as PlanDefinition[]).filter((p) => isPaidPlan(p.id) && p.price > 0);
 
   let candidate: PaidPlanId | null = refPlan || null;
+  let interval: BillingInterval =
+    refInterval ||
+    (subId && tenant.pending_subscription_id === subId && tenant.pending_interval === 'yearly'
+      ? 'yearly'
+      : subId && tenant.billing_subscription_id === subId && tenant.billing_interval === 'yearly'
+      ? 'yearly'
+      : 'monthly');
+
   if (!candidate && subId && tenant.pending_subscription_id === subId && isPaidPlan(tenant.pending_plan)) {
     candidate = tenant.pending_plan;
   }
@@ -67,26 +121,44 @@ function resolveVerifiedPlan(args: {
     candidate = tenant.billing_plan;
   }
 
-  // Se sabemos o valor efetivamente pago, confere se é compatível com o plano candidato
+  const expectedFor = (pid: PaidPlanId, intv: BillingInterval) =>
+    intv === 'yearly'
+      ? computeAnnualPricing(plans[pid].price, addons.annualDiscountPercent).yearlyTotal
+      : plans[pid].price;
+
   if (candidate && amount > 0) {
-    const expected = plans[candidate]?.price || 0;
-    if (expected > 0 && amount < expected * 0.9) {
-      // Valor pago é menor que o plano candidato: mapeia pelo valor real cobrado
-      const exactMatch = paidPlans.find((p) => Math.abs(p.price - amount) < 0.05);
-      if (exactMatch && isPaidPlan(exactMatch.id)) return exactMatch.id;
-      return null;
+    const expected = expectedFor(candidate, interval);
+    if (expected > 0 && amount >= expected * 0.9) {
+      // Também detecta automaticamente caso tenha pago o valor anual sem o sufixo
+      const yearlyExpected = expectedFor(candidate, 'yearly');
+      if (interval === 'monthly' && yearlyExpected > plans[candidate].price * 3 && Math.abs(amount - yearlyExpected) < 0.5) {
+        return { plan: candidate, interval: 'yearly' };
+      }
+      return { plan: candidate, interval };
     }
-    return candidate;
+
+    // Valor pago diverge do esperado: tenta casar pelo valor exato cobrado (mensal ou anual)
+    for (const p of paidPlans) {
+      if (!isPaidPlan(p.id)) continue;
+      const yPrice = expectedFor(p.id, 'yearly');
+      if (Math.abs(yPrice - amount) < 0.25) return { plan: p.id, interval: 'yearly' };
+      if (Math.abs(p.price - amount) < 0.25) return { plan: p.id, interval: 'monthly' };
+    }
+    return null;
   }
 
   if (amount > 0) {
-    const byValue = paidPlans.find((p) => Math.abs(p.price - amount) < 0.05);
-    if (byValue && isPaidPlan(byValue.id)) return byValue.id;
+    for (const p of paidPlans) {
+      if (!isPaidPlan(p.id)) continue;
+      const yPrice = expectedFor(p.id, 'yearly');
+      if (Math.abs(yPrice - amount) < 0.25) return { plan: p.id, interval: 'yearly' };
+      if (Math.abs(p.price - amount) < 0.25) return { plan: p.id, interval: 'monthly' };
+    }
   }
 
-  if (candidate) return candidate;
-  if (isPaidPlan(tenant.billing_plan)) return tenant.billing_plan;
-  return isPaidPlan(tenant.plan) ? tenant.plan : null;
+  if (candidate) return { plan: candidate, interval };
+  if (isPaidPlan(tenant.billing_plan)) return { plan: tenant.billing_plan, interval };
+  return isPaidPlan(tenant.plan) ? { plan: tenant.plan, interval } : null;
 }
 
 export async function POST(req: NextRequest) {
@@ -111,7 +183,8 @@ export async function POST(req: NextRequest) {
     const subId = payment?.subscription || subscription?.id || null;
     const customerId = payment?.customer || subscription?.customer || null;
     const extRefRaw = payment?.externalReference || subscription?.externalReference || null;
-    const { tenantId: refTenantId, planId: refPlan } = parseExternalRef(extRefRaw);
+    const parsedRef = parseExternalRef(extRefRaw);
+    const refTenantId = parsedRef.tenantId;
 
     let tenant: any = null;
     if (subId) {
@@ -157,33 +230,106 @@ export async function POST(req: NextRequest) {
 
     const nowIso = new Date().toISOString();
 
-    // 3. Pagamento confirmado/recebido → ativa plano verificado e substitui assinatura antiga (se houve upgrade)
+    // 2.5 Fluxo dedicado: Pacote Avulso de Respostas Extras de IA (erbots_topup:...)
+    if (parsedRef.kind === 'topup') {
+      if (event === 'PAYMENT_CONFIRMED' || event === 'PAYMENT_RECEIVED') {
+        const paidAmount = Number(payment?.value) || 0;
+        if (parsedRef.expectedPrice > 0 && paidAmount < parsedRef.expectedPrice * 0.9) {
+          console.error('[Asaas Webhook] Valor divergente em pacote avulso:', payment?.id);
+          return NextResponse.json({ received: true, error: 'topup_amount_mismatch' });
+        }
+
+        if (!parsedRef.topupReplies || !payment?.id) {
+          return NextResponse.json({ received: true, error: 'invalid_topup_payload' });
+        }
+
+        let alreadyProcessed = false;
+        const { error: payErr } = await supabase.from('xerb_payments').insert({
+          tenant_id: tenant.id,
+          amount: paidAmount || parsedRef.expectedPrice,
+          plan: 'extra_pack',
+          payment_method: mapMethod(payment?.billingType),
+          status: 'confirmed',
+          gateway_id: payment.id,
+          paid_at: nowIso,
+          expires_at: null,
+          notes: `extra_credits:${parsedRef.topupReplies}`,
+          invoice_url: payment?.invoiceUrl || null,
+          billing_type: payment?.billingType || null,
+        });
+
+        if (payErr) {
+          if ((payErr as any).code === '23505') {
+            alreadyProcessed = true;
+          } else {
+            throw payErr;
+          }
+        }
+
+        if (!alreadyProcessed) {
+          await addExtraCredits(supabase, tenant.id, parsedRef.topupReplies);
+          await supabase
+            .from('xerb_tenants')
+            .update({ quota_alert_period: null, updated_at: nowIso })
+            .eq('id', tenant.id);
+        }
+
+        return NextResponse.json({
+          received: true,
+          topupCredited: !alreadyProcessed,
+          creditsAdded: alreadyProcessed ? 0 : parsedRef.topupReplies,
+        });
+      }
+
+      if (event === 'PAYMENT_REFUNDED' || event === 'PAYMENT_CHARGEBACK_REQUESTED') {
+        if (payment?.id) {
+          await supabase.from('xerb_payments').update({ status: 'refunded' }).eq('gateway_id', payment.id);
+        }
+        if (parsedRef.topupReplies > 0) {
+          await addExtraCredits(supabase, tenant.id, -parsedRef.topupReplies);
+        }
+        return NextResponse.json({ received: true, topupRefunded: true });
+      }
+
+      // Cobranças avulsas vencidas (PAYMENT_OVERDUE) não afetam a assinatura recorrente
+      return NextResponse.json({ received: true, topupIgnored: event });
+    }
+
+    // 3. Pagamento confirmado/recebido de assinatura (Mensal ou Anual)
     if (event === 'PAYMENT_CONFIRMED' || event === 'PAYMENT_RECEIVED') {
-      const plansCfg = await getPlansConfig();
-      const plan = resolveVerifiedPlan({
+      const [plansCfg, addonsCfg] = await Promise.all([getPlansConfig(), getAddonsConfig()]);
+      const verified = resolveVerifiedPlan({
         tenant,
         plans: plansCfg,
+        addons: addonsCfg,
         subId,
-        refPlan,
+        refPlan: parsedRef.planId,
+        refInterval: parsedRef.interval,
         paidValue: payment?.value,
       });
 
-      if (!plan) {
+      if (!verified) {
         console.error('[Asaas Webhook] Não foi possível validar plano/valor do pagamento', payment?.id);
         return NextResponse.json({ received: true, error: 'plan_unresolved_or_amount_mismatch' });
       }
+
+      const { plan, interval } = verified;
+      const periodDays = interval === 'yearly' ? ANNUAL_BILLING_PERIOD_DAYS : BILLING_PERIOD_DAYS;
 
       const isUpgradeSwap = Boolean(
         subId && tenant.billing_subscription_id && tenant.billing_subscription_id !== subId
       );
       const oldSubToCancel = isUpgradeSwap ? tenant.billing_subscription_id : null;
 
-      // Na troca de plano começa ciclo novo de 31 dias a partir de agora; na renovação do mesmo plano soma ao vencimento
       const currentUntil = tenant.trial_ends_at ? new Date(tenant.trial_ends_at).getTime() : 0;
       const isSamePlanRenewal =
-        !isUpgradeSwap && tenant.plan === plan && tenant.subscription_status === 'active' && currentUntil > Date.now();
+        !isUpgradeSwap &&
+        tenant.plan === plan &&
+        (tenant.billing_interval || 'monthly') === interval &&
+        tenant.subscription_status === 'active' &&
+        currentUntil > Date.now();
       const base = isSamePlanRenewal ? currentUntil : Date.now();
-      const expiresAt = new Date(base + BILLING_PERIOD_DAYS * DAY_MS).toISOString();
+      const expiresAt = new Date(base + periodDays * DAY_MS).toISOString();
 
       let alreadyProcessed = false;
       const { error: payErr } = await supabase.from('xerb_payments').insert({
@@ -195,7 +341,7 @@ export async function POST(req: NextRequest) {
         gateway_id: payment?.id || null,
         paid_at: nowIso,
         expires_at: expiresAt,
-        notes: `Asaas ${event}`,
+        notes: `Asaas ${event} (${interval})`,
         invoice_url: payment?.invoiceUrl || null,
         billing_type: payment?.billingType || null,
       });
@@ -212,10 +358,12 @@ export async function POST(req: NextRequest) {
         const tenantUpdate: Record<string, any> = {
           plan,
           billing_plan: plan,
+          billing_interval: interval,
           subscription_status: 'active',
           trial_ends_at: expiresAt,
           pending_subscription_id: null,
           pending_plan: null,
+          pending_interval: null,
           pending_invoice_url: null,
           updated_at: nowIso,
         };
@@ -234,14 +382,15 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      return NextResponse.json({ received: true, activated: !alreadyProcessed, plan });
+      return NextResponse.json({ received: true, activated: !alreadyProcessed, plan, interval });
     }
 
-    // 4. Cobrança vencida → apenas afeta se for da assinatura principal vigente (não de um checkout abandonado)
+    // 4. Cobrança vencida → apenas afeta se for da assinatura principal vigente (não de cobrança avulsa/checkout abandonado)
     if (event === 'PAYMENT_OVERDUE') {
       if (
+        subId &&
         tenant.subscription_status === 'active' &&
-        (!subId || !tenant.billing_subscription_id || subId === tenant.billing_subscription_id)
+        (!tenant.billing_subscription_id || subId === tenant.billing_subscription_id)
       ) {
         await supabase
           .from('xerb_tenants')
@@ -251,11 +400,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ received: true });
     }
 
-    // 5. Estorno / chargeback → bloqueia imediatamente
+    // 5. Estorno / chargeback → verifica se foi pacote avulso antes de cancelar assinatura principal
     if (event === 'PAYMENT_REFUNDED' || event === 'PAYMENT_CHARGEBACK_REQUESTED') {
       if (payment?.id) {
+        const { data: existingPay } = await supabase
+          .from('xerb_payments')
+          .select('id, plan, notes')
+          .eq('gateway_id', payment.id)
+          .maybeSingle();
+
         await supabase.from('xerb_payments').update({ status: 'refunded' }).eq('gateway_id', payment.id);
+
+        if (existingPay?.plan === 'extra_pack') {
+          const m = /extra_credits:(\d+)/.exec(existingPay.notes || '');
+          const credits = m ? Number(m[1]) || 0 : 0;
+          if (credits > 0) await addExtraCredits(supabase, tenant.id, -credits);
+          return NextResponse.json({ received: true, topupRefunded: true });
+        }
       }
+
       await supabase
         .from('xerb_tenants')
         .update({ subscription_status: 'canceled', trial_ends_at: nowIso, updated_at: nowIso })
@@ -276,6 +439,7 @@ export async function POST(req: NextRequest) {
           .update({
             pending_subscription_id: null,
             pending_plan: null,
+            pending_interval: null,
             pending_invoice_url: null,
             updated_at: nowIso,
           })

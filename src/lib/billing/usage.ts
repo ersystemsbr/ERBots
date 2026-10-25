@@ -33,7 +33,13 @@ export async function getUsage(db: Db, tenantId: string): Promise<UsageSnapshot>
 export async function recordUsage(
   db: Db,
   tenantId: string,
-  delta: { aiReplies?: number; messagesIn?: number; tokensIn?: number; tokensOut?: number }
+  delta: {
+    aiReplies?: number;
+    messagesIn?: number;
+    tokensIn?: number;
+    tokensOut?: number;
+    consumeExtraCredit?: boolean;
+  }
 ): Promise<void> {
   try {
     const { error } = await db.rpc('xerb_increment_usage', {
@@ -45,9 +51,23 @@ export async function recordUsage(
       p_tokens_out: delta.tokensOut || 0,
     });
     if (error) console.warn('[Usage] Falha ao registrar uso:', error.message);
+
+    if (delta.consumeExtraCredit && (delta.aiReplies || 0) > 0) {
+      const { error: extErr } = await db.rpc('xerb_consume_extra_credit', { p_tenant: tenantId });
+      if (extErr) console.warn('[Usage] Falha ao descontar crédito extra:', extErr.message);
+    }
   } catch (err) {
     console.warn('[Usage] Exceção ao registrar uso:', err);
   }
+}
+
+export async function addExtraCredits(db: Db, tenantId: string, delta: number): Promise<number> {
+  const { data, error } = await db.rpc('xerb_add_extra_credits', {
+    p_tenant: tenantId,
+    p_delta: Math.trunc(delta),
+  });
+  if (error) throw error;
+  return Number(data) || 0;
 }
 
 export type GateReason = AccessReason | 'limit_reached';
@@ -55,11 +75,12 @@ export type GateReason = AccessReason | 'limit_reached';
 export interface GateResult {
   allowed: boolean;
   reason: GateReason;
+  usingExtraCredits?: boolean;
 }
 
 /**
  * Portão central de monetização: o robô só responde com IA se a assinatura/trial estiver vigente
- * e o limite mensal de respostas do plano não tiver sido atingido.
+ * e o limite mensal de respostas do plano não tiver sido atingido (ou houver créditos avulsos ativos).
  */
 export async function checkAiGate(
   db: Db,
@@ -69,16 +90,33 @@ export async function checkAiGate(
     subscription_status?: string | null;
     trial_ends_at?: string | null;
     is_super_admin?: boolean | null;
+    extra_ai_credits?: number | null;
   }
 ): Promise<GateResult> {
   const access = getAccessState(tenant);
   if (!access.allowed) return { allowed: false, reason: access.reason };
 
-  if (tenant.is_super_admin) return { allowed: true, reason: 'ok' };
+  if (tenant.is_super_admin) return { allowed: true, reason: 'ok', usingExtraCredits: false };
 
   const plan = getPlan(tenant.plan, await getPlansConfig());
   const usage = await getUsage(db, tenant.id);
-  if (usage.ai_replies >= plan.monthlyAiReplies) return { allowed: false, reason: 'limit_reached' };
+  if (usage.ai_replies < plan.monthlyAiReplies) {
+    return { allowed: true, reason: 'ok', usingExtraCredits: false };
+  }
 
-  return { allowed: true, reason: 'ok' };
+  let extraCredits = Number(tenant.extra_ai_credits);
+  if (!Number.isFinite(extraCredits)) {
+    const { data } = await db
+      .from('xerb_tenants')
+      .select('extra_ai_credits')
+      .eq('id', tenant.id)
+      .maybeSingle();
+    extraCredits = Number(data?.extra_ai_credits) || 0;
+  }
+
+  if (extraCredits > 0) {
+    return { allowed: true, reason: 'ok', usingExtraCredits: true };
+  }
+
+  return { allowed: false, reason: 'limit_reached' };
 }

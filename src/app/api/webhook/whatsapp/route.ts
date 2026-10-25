@@ -11,8 +11,8 @@ import {
 import { processAIMessage, transcribeMedia, CapturedLead } from '@/lib/ai/gemini';
 import { verifyWebhookToken } from '@/lib/webhook';
 import { checkAiGate, recordUsage } from '@/lib/billing/usage';
-import { getPlansConfig } from '@/lib/billing/plans-config';
-import { getPlan } from '@/lib/plans';
+import { getAddonsConfig, getPlansConfig } from '@/lib/billing/plans-config';
+import { currentUsagePeriod, formatBRL, getPlan } from '@/lib/plans';
 import { logSystemEvent } from '@/lib/monitoring';
 
 export const maxDuration = 60;
@@ -359,6 +359,11 @@ async function handleOwnerMessage(
   else if (content.kind === 'audio' || content.kind === 'image') text = '📎 [Mídia enviada pelo atendente]';
   if (!text) return NextResponse.json({ skipped: true, reason: 'fromMe ignored' });
 
+  // Ecos de alertas automáticos da plataforma (régua de trial, queda, franquia) não abrem conversa humana
+  if (/^(?:⚠️|🚀|⏳|⚡|📈|🔔|🎯)\s*\*ERBots\b/.test(text)) {
+    return NextResponse.json({ skipped: true, reason: 'system alert echo' });
+  }
+
   if (await isDuplicate(db, tenantId, waId)) {
     return NextResponse.json({ skipped: true, reason: 'duplicate' });
   }
@@ -630,7 +635,9 @@ export async function POST(req: NextRequest) {
     const [tenantRes, botSettingsRes, kbRes, plansCfg] = await Promise.all([
       supabase
         .from('xerb_tenants')
-        .select('id, name, segment, phone, alert_phone, plan, subscription_status, trial_ends_at, is_super_admin')
+        .select(
+          'id, name, segment, phone, alert_phone, plan, subscription_status, trial_ends_at, is_super_admin, extra_ai_credits, quota_alert_period'
+        )
         .eq('id', tenantId)
         .single(),
       supabase.from('xerb_bot_settings').select('*').eq('tenant_id', tenantId).maybeSingle(),
@@ -824,9 +831,33 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 7.1 Bloqueado por assinatura/limite (a mensagem já foi salva)
+    // 7.1 Bloqueado por assinatura/limite (a mensagem já foi salva; avisa 1x no mês se bateu o teto da franquia)
     if (!gate.allowed) {
       console.warn(`[Webhook] IA bloqueada para o tenant ${tenantId}: ${gate.reason}`);
+      if (gate.reason === 'limit_reached') {
+        const curPeriod = currentUsagePeriod();
+        if (tenant.quota_alert_period !== curPeriod) {
+          await supabase
+            .from('xerb_tenants')
+            .update({ quota_alert_period: curPeriod, updated_at: new Date().toISOString() })
+            .eq('id', tenantId);
+
+          const ownerPhone = normalizeBrPhone(tenant.alert_phone) || normalizeBrPhone(tenant.phone);
+          if (ownerPhone && !samePhone(ownerPhone, cleanPhone)) {
+            const addons = await getAddonsConfig();
+            const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://www.erbots.com.br').replace(/\/+$/, '');
+            const quotaMsg = [
+              '📈 *ERBots – Franquia mensal de IA atingida*',
+              '',
+              `Sua atendente virtual atingiu 100% das respostas mensais do plano *${getPlan(tenant.plan, plansCfg).name}* e pausou temporariamente.`,
+              '',
+              `Libere *+${addons.extraPackReplies.toLocaleString('pt-BR')} respostas avulsas* por apenas *${formatBRL(addons.extraPackPrice)}* (não expiram na virada do mês) ou faça upgrade em 1 clique:`,
+              `👉 ${appUrl}/dashboard`,
+            ].join('\n');
+            await sendTextMessage(instanceName, ownerPhone, quotaMsg).catch(() => false);
+          }
+        }
+      }
       return NextResponse.json({ success: true, skipped: true, reason: gate.reason });
     }
 
@@ -904,6 +935,7 @@ export async function POST(req: NextRequest) {
         aiReplies: 1,
         tokensIn: aiResult.usage.tokensIn,
         tokensOut: aiResult.usage.tokensOut,
+        consumeExtraCredit: Boolean(gate.usingExtraCredits),
       });
     }
 

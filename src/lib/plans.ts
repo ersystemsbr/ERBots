@@ -8,6 +8,53 @@
 
 export type PlanId = 'trial' | 'start' | 'pro' | 'business';
 export type PaidPlanId = Exclude<PlanId, 'trial'>;
+export type BillingInterval = 'monthly' | 'yearly';
+
+export interface CommercialAddons {
+  /** Desconto percentual para contratação anual (0 a 50). Padrão: 20% */
+  annualDiscountPercent: number;
+  /** Preço em R$ do pacote avulso de respostas extras de IA */
+  extraPackPrice: number;
+  /** Quantidade de respostas extras liberadas por pacote avulso (não expiram na virada do mês) */
+  extraPackReplies: number;
+}
+
+export const DEFAULT_ADDONS: CommercialAddons = {
+  annualDiscountPercent: 20,
+  extraPackPrice: 19.9,
+  extraPackReplies: 1000,
+};
+
+export function sanitizeAddonsConfig(input: any): CommercialAddons {
+  const out: CommercialAddons = { ...DEFAULT_ADDONS };
+  if (!input || typeof input !== 'object') return out;
+
+  const disc = Number(input.annualDiscountPercent);
+  if (Number.isFinite(disc) && disc >= 0 && disc <= 50) {
+    out.annualDiscountPercent = Math.round(disc);
+  }
+  const packPrice = Number(input.extraPackPrice);
+  if (Number.isFinite(packPrice) && packPrice >= 5 && packPrice <= 50000) {
+    out.extraPackPrice = Math.round(packPrice * 100) / 100;
+  }
+  const packReplies = Number(input.extraPackReplies);
+  if (Number.isFinite(packReplies) && packReplies >= 100 && packReplies <= 1000000) {
+    out.extraPackReplies = Math.floor(packReplies);
+  }
+  return out;
+}
+
+export function computeAnnualPricing(
+  monthlyPrice: number,
+  discountPercent: number = DEFAULT_ADDONS.annualDiscountPercent
+): { monthlyEquivalent: number; yearlyTotal: number; yearlySavings: number } {
+  if (monthlyPrice <= 0) return { monthlyEquivalent: 0, yearlyTotal: 0, yearlySavings: 0 };
+  const safeDisc = Math.min(50, Math.max(0, Number(discountPercent) || 0));
+  const monthlyEquivalent = Math.round(monthlyPrice * (1 - safeDisc / 100) * 100) / 100;
+  const yearlyTotal = Math.max(5, Math.round(monthlyEquivalent * 12 * 100) / 100);
+  const yearlySavings = Math.max(0, Math.round((monthlyPrice * 12 - yearlyTotal) * 100) / 100);
+  return { monthlyEquivalent, yearlyTotal, yearlySavings };
+}
 
 export interface PlanDefinition {
   id: PlanId;
@@ -165,6 +212,8 @@ export const PAST_DUE_GRACE_DAYS = 3;
 export const ACTIVE_BUFFER_HOURS = 36;
 /** Dias de vigência de cada mensalidade confirmada */
 export const BILLING_PERIOD_DAYS = 31;
+/** Dias de vigência de cada anuidade confirmada */
+export const ANNUAL_BILLING_PERIOD_DAYS = 366;
 
 export type AccessReason =
   | 'ok'

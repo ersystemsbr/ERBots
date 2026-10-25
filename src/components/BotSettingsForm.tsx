@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { authFetch } from '@/lib/api-client';
 import { DEFAULT_HANDOFF_KEYWORDS } from '@/lib/ai/gemini';
-import { Save, Bot, Clock, UserCheck, Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Save, Bot, Clock, UserCheck, Sparkles, CheckCircle2, AlertCircle, MessageCircleReply } from 'lucide-react';
 
 interface BotSettingsFormProps {
   tenantId: string;
@@ -43,6 +43,10 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
   const [handoffMessage, setHandoffMessage] = useState<string>(
     'Com certeza! Estou transferindo seu atendimento para nossa equipe humana. Aguarde um instante que já vamos te responder.'
   );
+
+  // Follow-up Automático de Oportunidades
+  const [autoFollowupEnabled, setAutoFollowupEnabled] = useState<boolean>(true);
+  const [autoFollowupDelayMinutes, setAutoFollowupDelayMinutes] = useState<number>(180);
 
   const daysList = [
     { id: 0, label: 'Dom' },
@@ -100,6 +104,11 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
             data.human_handoff_message ||
               'Com certeza! Estou transferindo seu atendimento para nossa equipe humana. Aguarde um instante que já vamos te responder.'
           );
+
+          setAutoFollowupEnabled(data.auto_followup_enabled !== false);
+          if (data.auto_followup_delay_minutes) {
+            setAutoFollowupDelayMinutes(Number(data.auto_followup_delay_minutes) || 180);
+          }
         }
       } catch (err) {
         console.error('Erro ao carregar configurações do robô:', err);
@@ -141,6 +150,8 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
           human_handoff_enabled: handoffEnabled,
           human_handoff_keywords: keywordsArray,
           human_handoff_message: handoffMessage,
+          auto_followup_enabled: autoFollowupEnabled,
+          auto_followup_delay_minutes: autoFollowupDelayMinutes,
         }),
       });
 
@@ -401,6 +412,52 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
                 className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500 text-sm"
               />
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* Bloco 4: Follow-up Automático de Oportunidades */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl">
+        <div className="flex items-center justify-between pb-6 border-b border-slate-800 gap-4">
+          <div>
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              <MessageCircleReply className="w-6 h-6 text-emerald-400" />
+              Follow-up Automático de Orçamentos
+            </h2>
+            <p className="text-slate-400 text-sm mt-1">
+              Quando um cliente pedir orçamento ou serviço e parar de responder, a IA envia <strong>um único retorno gentil</strong> em horário comercial para recuperar a venda.
+            </p>
+          </div>
+
+          <label className="flex items-center gap-3 cursor-pointer shrink-0">
+            <input
+              type="checkbox"
+              checked={autoFollowupEnabled}
+              onChange={(e) => setAutoFollowupEnabled(e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 relative"></div>
+          </label>
+        </div>
+
+        {autoFollowupEnabled && (
+          <div className="pt-6 max-w-md">
+            <label className="block text-sm font-semibold text-slate-300 mb-2">
+              Aguardar quanto tempo sem resposta antes do retorno?
+            </label>
+            <select
+              value={autoFollowupDelayMinutes}
+              onChange={(e) => setAutoFollowupDelayMinutes(Number(e.target.value))}
+              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-emerald-500"
+            >
+              <option value={60}>1 hora sem resposta</option>
+              <option value={180}>3 horas sem resposta (Recomendado)</option>
+              <option value={360}>6 horas sem resposta</option>
+              <option value={720}>12 horas sem resposta</option>
+            </select>
+            <p className="text-xs text-slate-500 mt-1.5">
+              Segurança anti-incômodo: envia no máximo 1 mensagem por oportunidade, somente entre 08h30 e 20h30 (Brasília), e nunca interrompe conversas em modo humano.
+            </p>
           </div>
         )}
       </div>

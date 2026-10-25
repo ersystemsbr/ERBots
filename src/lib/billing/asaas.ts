@@ -94,17 +94,22 @@ export interface CreateSubscriptionInput {
   value: number;
   description: string;
   externalReference: string;
+  cycle?: 'MONTHLY' | 'YEARLY';
+}
+
+function todayBrtDateString(): string {
+  const today = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(
+    today.getDate()
+  ).padStart(2, '0')}`;
 }
 
 /**
- * Cria assinatura mensal. billingType UNDEFINED = o cliente escolhe Pix, boleto ou cartão na fatura.
+ * Cria assinatura mensal ou anual. billingType UNDEFINED = o cliente escolhe Pix, boleto ou cartão na fatura.
  * O primeiro vencimento é hoje (cobrança imediata).
  */
 export async function createSubscription(input: CreateSubscriptionInput): Promise<{ id: string }> {
-  const today = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
-  const nextDueDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(
-    today.getDate()
-  ).padStart(2, '0')}`;
+  const nextDueDate = todayBrtDateString();
 
   return asaasFetch<{ id: string }>('/subscriptions', {
     method: 'POST',
@@ -113,11 +118,43 @@ export async function createSubscription(input: CreateSubscriptionInput): Promis
       billingType: 'UNDEFINED',
       value: input.value,
       nextDueDate,
-      cycle: 'MONTHLY',
+      cycle: input.cycle || 'MONTHLY',
       description: input.description,
       externalReference: input.externalReference,
     }),
   });
+}
+
+export interface CreateOneTimePaymentInput {
+  customerId: string;
+  value: number;
+  description: string;
+  externalReference: string;
+}
+
+/**
+ * Cria cobrança avulsa (ex.: Pacote Extra de Respostas IA) sem alterar a assinatura recorrente do cliente.
+ */
+export async function createOneTimePayment(
+  input: CreateOneTimePaymentInput
+): Promise<{ id: string; invoiceUrl: string | null }> {
+  const dueDate = todayBrtDateString();
+  const created = await asaasFetch<{ id: string; invoiceUrl?: string }>('/payments', {
+    method: 'POST',
+    body: JSON.stringify({
+      customer: input.customerId,
+      billingType: 'UNDEFINED',
+      value: input.value,
+      dueDate,
+      description: input.description,
+      externalReference: input.externalReference,
+    }),
+  });
+
+  return {
+    id: created.id,
+    invoiceUrl: created.invoiceUrl || null,
+  };
 }
 
 export async function cancelSubscription(subscriptionId: string): Promise<void> {

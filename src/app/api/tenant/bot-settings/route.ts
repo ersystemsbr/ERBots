@@ -72,6 +72,11 @@ export async function PUT(req: NextRequest) {
       .trim()
       .slice(0, 500);
 
+    const autoFollowupEnabled = body.auto_followup_enabled !== false;
+    const rawDelay = Number(body.auto_followup_delay_minutes);
+    const autoFollowupDelayMinutes =
+      Number.isFinite(rawDelay) && rawDelay >= 30 && rawDelay <= 1440 ? Math.round(rawDelay) : 180;
+
     const supabase = getServiceSupabase();
     const { data, error } = await supabase
       .from('xerb_bot_settings')
@@ -86,6 +91,8 @@ export async function PUT(req: NextRequest) {
           human_handoff_enabled: handoffEnabled,
           human_handoff_keywords: keywords,
           human_handoff_message: handoffMessage,
+          auto_followup_enabled: autoFollowupEnabled,
+          auto_followup_delay_minutes: autoFollowupDelayMinutes,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'tenant_id' }

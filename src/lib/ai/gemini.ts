@@ -310,7 +310,7 @@ export async function getGeminiApiKey(): Promise<string> {
  * Verifica se o momento atual está dentro do horário de atendimento configurado (Fuso Horário de Brasília).
  * Suporta tanto expediente diurno (ex.: 08:00 às 18:00) quanto expediente que atravessa a meia-noite (ex.: 18:00 às 02:00).
  */
-function isWithinBusinessHours(hoursConfig: BotContext['botSettings']['business_hours']): boolean {
+export function isWithinBusinessHours(hoursConfig: BotContext['botSettings']['business_hours']): boolean {
   if (!hoursConfig || !hoursConfig.enabled) return true;
 
   try {
@@ -732,4 +732,73 @@ REGRAS OBRIGATÓRIAS:
 
   console.error('[Gemini KB Extract] Falha em todos os modelos:', lastErr?.message || lastErr);
   throw new Error('Não foi possível estruturar o conteúdo com a IA agora. Tente novamente em instantes.');
+}
+
+/**
+ * Gera mensagem curta, humana e cordial de follow-up (retorno comercial) para oportunidades em aberto.
+ */
+export async function generateFollowupMessage(params: {
+  companyName: string;
+  botName?: string | null;
+  tone?: 'formal' | 'friendly' | 'enthusiastic' | 'direct';
+  customerName?: string | null;
+  interest: string;
+  preferredSlot?: string | null;
+  lastAiMessage?: string | null;
+}): Promise<{ text: string; tokensIn: number; tokensOut: number }> {
+  const safeCustomer = sanitizeUntrustedLabel(params.customerName, 50);
+  const firstName =
+    safeCustomer && !/^\d+$/.test(safeCustomer.replace(/\D/g, '')) && !safeCustomer.startsWith('LID:')
+      ? safeCustomer.split(' ')[0]
+      : '';
+  const safeInterest = sanitizeUntrustedLabel(params.interest, 120) || 'seu atendimento';
+  const safeCompany = sanitizeUntrustedLabel(params.companyName, 70) || 'nossa equipe';
+
+  const fallbackText = firstName
+    ? `Oi, ${firstName}! Tudo bem? 😊 Passando só para saber se ficou alguma dúvida sobre *${safeInterest}* ou se posso te ajudar a dar andamento!`
+    : `Olá! Tudo bem? 😊 Passando só para saber se ficou alguma dúvida sobre *${safeInterest}* ou se posso te ajudar com mais alguma informação!`;
+
+  const apiKey = await getGeminiApiKey();
+  if (!apiKey) {
+    return { text: fallbackText, tokensIn: 0, tokensOut: 0 };
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
+  const prompt = `
+Você é "${sanitizeUntrustedLabel(params.botName, 50) || 'Atendente Virtual'}" da empresa "${safeCompany}".
+Escreva UMA mensagem curtíssima de WhatsApp (máximo 2 frases, até 240 caracteres) fazendo um retorno gentil e sem pressão para um cliente que demonstrou interesse em "${safeInterest}"${
+    params.preferredSlot ? ` (preferência citada: "${sanitizeUntrustedLabel(params.preferredSlot, 80)}")` : ''
+  } há algumas horas e ainda não respondeu.
+${firstName ? `Nome do cliente: "${firstName}".` : 'Não sabemos o nome do cliente (use apenas "Olá!").'}
+${params.lastAiMessage ? `Sua última mensagem enviada antes foi: "${String(params.lastAiMessage).slice(0, 260)}" (não repita o mesmo texto).` : ''}
+Regras: Português do Brasil natural, acolhedor, sem aspas em volta, NUNCA use marcadores [[HANDOFF]] ou [[LEAD]].
+`.trim();
+
+  try {
+    const response = await ai.models.generateContent({
+      model: ECONOMY_GEMINI_MODEL,
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } },
+    });
+
+    const raw = (response.text || '')
+      .replace(HANDOFF_MARKER, '')
+      .replace(LEAD_ANY_MARKER, '')
+      .replace(/^["']|["']$/g, '')
+      .trim();
+
+    if (raw && raw.length >= 15 && raw.length <= 420) {
+      const candidatesTokens = Number(response.usageMetadata?.candidatesTokenCount) || 0;
+      const thoughtsTokens = Number((response.usageMetadata as any)?.thoughtsTokenCount) || 0;
+      return {
+        text: raw,
+        tokensIn: Number(response.usageMetadata?.promptTokenCount) || 0,
+        tokensOut: candidatesTokens + thoughtsTokens,
+      };
+    }
+  } catch (err: any) {
+    console.warn('[Gemini Followup] Usando mensagem padrão:', err?.message || err);
+  }
+
+  return { text: fallbackText, tokensIn: 0, tokensOut: 0 };
 }

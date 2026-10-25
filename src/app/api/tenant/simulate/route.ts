@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
     const [tenantRes, botRes, kbRes, plansCfg] = await Promise.all([
       supabase
         .from('xerb_tenants')
-        .select('id, name, segment, plan, subscription_status, trial_ends_at, is_super_admin')
+        .select('id, name, segment, plan, subscription_status, trial_ends_at, is_super_admin, extra_ai_credits')
         .eq('id', tid)
         .single(),
       supabase.from('xerb_bot_settings').select('*').eq('tenant_id', tid).maybeSingle(),
@@ -103,6 +103,7 @@ export async function POST(req: NextRequest) {
         aiReplies: 1,
         tokensIn: aiResult.usage.tokensIn,
         tokensOut: aiResult.usage.tokensOut,
+        consumeExtraCredit: Boolean(gate.usingExtraCredits),
       });
     }
 

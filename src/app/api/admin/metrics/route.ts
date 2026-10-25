@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
 import { requireSuperAdmin } from '@/lib/auth';
-import { getPlan } from '@/lib/plans';
-import { getPlansConfig } from '@/lib/billing/plans-config';
+import { computeAnnualPricing, getPlan } from '@/lib/plans';
+import { getAddonsConfig, getPlansConfig } from '@/lib/billing/plans-config';
 
 export const maxDuration = 60;
 
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
     // 1. Busca todos os Tenants
     const { data: tenants, error: tenantsErr } = await supabase
       .from('xerb_tenants')
-      .select('id, name, slug, plan, subscription_status, is_super_admin, created_at, trial_ends_at');
+      .select('id, name, slug, plan, billing_interval, subscription_status, is_super_admin, created_at, trial_ends_at');
 
     if (tenantsErr) throw tenantsErr;
 
@@ -47,14 +47,20 @@ export async function GET(req: NextRequest) {
     const connectedWhatsApps = allInstances.filter((i) => i.status === 'CONNECTED').length;
     const disconnectedWhatsApps = allInstances.filter((i) => i.status !== 'CONNECTED').length;
 
-    // MRR estimado: soma apenas assinantes comerciais reais (sem contas Super Admin)
-    const plansCfg = await getPlansConfig();
+    // MRR estimado: soma apenas assinantes comerciais reais (mensal = preço cheio; anual = equivalente mensal)
+    const [plansCfg, addonsCfg] = await Promise.all([getPlansConfig(), getAddonsConfig()]);
     let estimatedMRR = 0;
-    customerTenants.forEach((t) => {
+    customerTenants.forEach((t: any) => {
       if (t.subscription_status === 'active') {
-        estimatedMRR += getPlan(t.plan, plansCfg).price;
+        const basePrice = getPlan(t.plan, plansCfg).price;
+        if (t.billing_interval === 'yearly') {
+          estimatedMRR += computeAnnualPricing(basePrice, addonsCfg.annualDiscountPercent).monthlyEquivalent;
+        } else {
+          estimatedMRR += basePrice;
+        }
       }
     });
+    estimatedMRR = Math.round(estimatedMRR * 100) / 100;
 
     const plansBreakdown = {
       trial: customerTenants.filter((t) => t.plan === 'trial').length,
