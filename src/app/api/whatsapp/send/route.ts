@@ -61,7 +61,9 @@ export async function POST(req: NextRequest) {
       // ou contatos que já conversaram com este WhatsApp.
       if (!existingConv && !guard.ctx.isSuperAdmin) {
         const target8 = last8(clean);
-        const allowed = [last8(tenant.phone), last8(inst.phone_connected)].filter(Boolean);
+        const allowed = [last8(tenant.phone), last8((tenant as any).alert_phone), last8(inst.phone_connected)].filter(
+          Boolean
+        );
         if (!allowed.includes(target8)) {
           return NextResponse.json(
             {

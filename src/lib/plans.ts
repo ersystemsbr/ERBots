@@ -69,8 +69,8 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     name: 'Business',
     price: 449,
     monthlyAiReplies: 10000,
-    maxInstances: 3,
-    description: 'Para empresas maiores, clínicas com várias unidades e alto volume.',
+    maxInstances: 1,
+    description: 'Para empresas maiores, clínicas de alto fluxo e operações intensas.',
     features: [
       'IA com ajuste fino de prompts complexos',
       'Transbordo com roteamento de equipe',

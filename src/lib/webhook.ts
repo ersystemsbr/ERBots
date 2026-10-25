@@ -10,9 +10,9 @@ export function buildWebhookUrl(req: NextRequest): string {
   const proto = req.headers.get('x-forwarded-proto') || 'https';
   let baseUrl = process.env.NEXT_PUBLIC_APP_URL || `${proto}://${host}`;
 
-  // Em localhost ou no domínio ainda em propagação, usa o domínio estável da Vercel
-  if (!baseUrl || baseUrl.includes('localhost') || baseUrl.includes('erbots.com.br')) {
-    baseUrl = 'https://erbots.vercel.app';
+  // Em ambiente local de desenvolvimento, aponta para o domínio oficial de produção
+  if (!baseUrl || baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')) {
+    baseUrl = 'https://www.erbots.com.br';
   }
 
   let url = `${baseUrl.replace(/\/+$/, '')}/api/webhook/whatsapp`;
@@ -28,11 +28,13 @@ export function isWebhookSecretConfigured(): boolean {
 /**
  * Valida o token do webhook.
  * - Com WEBHOOK_SECRET definido: exige token válido (comparação em tempo constante).
- * - Sem WEBHOOK_SECRET: aceita (modo de transição) e o painel admin alerta que está desprotegido.
+ * - Em produção sem WEBHOOK_SECRET: falha fechado (rejeita requisições não autenticadas).
  */
 export function verifyWebhookToken(req: NextRequest): boolean {
   const secret = process.env.WEBHOOK_SECRET;
-  if (!secret) return true;
+  if (!secret) {
+    return process.env.NODE_ENV !== 'production';
+  }
 
   const provided = req.nextUrl.searchParams.get('token') || '';
   const a = Buffer.from(provided);

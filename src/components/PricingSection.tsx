@@ -11,8 +11,8 @@ export default function PricingSection() {
   const plans = usePlans();
 
   return (
-    <section id="precos" className="py-20 bg-slate-900/60 border-y border-slate-900">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <section id="planos" className="py-20 bg-slate-900/60 border-y border-slate-900 scroll-mt-20">
+      <div id="precos" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center max-w-2xl mx-auto mb-14 space-y-2">
           <h2 className="text-2xl sm:text-3xl font-extrabold text-white">Planos simples, sem taxa de adesão</h2>
           <p className="text-xs sm:text-sm text-slate-400">

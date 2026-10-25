@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
         .select('sender, created_at, conversation_id')
         .eq('tenant_id', tid)
         .gte('created_at', sinceIso)
-        .order('created_at', { ascending: true })
+        .order('created_at', { ascending: false })
         .limit(5000),
       supabase
         .from('xerb_knowledge_base')

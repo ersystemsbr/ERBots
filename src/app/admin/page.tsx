@@ -74,16 +74,32 @@ export default function AdminDashboardPage() {
         }
 
         setCurrentUser(user);
-        const authorized = isDefaultAdmin(user.email);
-        setIsAdmin(authorized);
 
-        if (!authorized) {
+        // Valida permissão Super Admin diretamente nas APIs protegidas no servidor
+        setLoadingMetrics(true);
+        const [metricsRes, tenantsRes] = await Promise.all([
+          authFetch('/api/admin/metrics'),
+          authFetch('/api/admin/tenants'),
+        ]);
+        setLoadingMetrics(false);
+
+        if (metricsRes.status === 401 || metricsRes.status === 403) {
+          setIsAdmin(false);
           setLoading(false);
           return;
         }
 
-        // Se for admin, carrega dados iniciais
-        await loadDashboardData(user.email);
+        const authorized = metricsRes.ok || isDefaultAdmin(user.email);
+        setIsAdmin(authorized);
+
+        if (metricsRes.ok) {
+          const mData = await metricsRes.json();
+          setMetrics(mData.metrics);
+        }
+        if (tenantsRes.ok) {
+          const tData = await tenantsRes.json();
+          setTenants(tData.tenants || []);
+        }
       } catch (err) {
         console.error('Erro na autenticação do admin:', err);
         setIsAdmin(false);

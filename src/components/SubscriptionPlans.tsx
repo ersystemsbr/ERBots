@@ -50,8 +50,13 @@ export default function SubscriptionPlans({ tenant, onTenantUpdated }: Subscript
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [pendingInvoiceUrl, setPendingInvoiceUrl] = useState<string | null>(tenant?.pending_invoice_url || null);
   const [usedReplies, setUsedReplies] = useState<number | null>(null);
   const [payments, setPayments] = useState<any[]>([]);
+
+  useEffect(() => {
+    setPendingInvoiceUrl(tenant?.pending_invoice_url || null);
+  }, [tenant?.pending_invoice_url]);
 
   const loadExtras = useCallback(async () => {
     if (!tenant?.id) return;
@@ -84,7 +89,7 @@ export default function SubscriptionPlans({ tenant, onTenantUpdated }: Subscript
     loadExtras();
   }, [loadExtras]);
 
-  const refreshTenant = async () => {
+  const refreshTenant = useCallback(async () => {
     setRefreshing(true);
     try {
       const res = await authFetch('/api/tenant/bootstrap', { method: 'POST' });
@@ -94,7 +99,16 @@ export default function SubscriptionPlans({ tenant, onTenantUpdated }: Subscript
     } finally {
       setRefreshing(false);
     }
-  };
+  }, [loadExtras, onTenantUpdated]);
+
+  // Atualiza status automaticamente quando o usuário volta da aba de pagamento Pix/Cartão
+  useEffect(() => {
+    const onFocus = () => {
+      if (pendingInvoiceUrl) refreshTenant();
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [pendingInvoiceUrl, refreshTenant]);
 
   const handleSubscribe = async (planId: PaidPlanId) => {
     setError(null);
@@ -116,7 +130,10 @@ export default function SubscriptionPlans({ tenant, onTenantUpdated }: Subscript
         return;
       }
       if (data.invoiceUrl) {
-        setInfo('Fatura gerada! Abrimos o pagamento em uma nova aba. Após pagar, clique em "Atualizar status".');
+        setPendingInvoiceUrl(data.invoiceUrl);
+        setInfo(
+          'Fatura gerada! Se a janela de pagamento não abrir automaticamente no seu celular, toque no botão "Abrir Fatura para Pagar" abaixo.'
+        );
         window.open(data.invoiceUrl, '_blank', 'noopener');
       } else {
         setInfo('Assinatura criada. A fatura será enviada ao seu e-mail em instantes.');
@@ -258,8 +275,24 @@ export default function SubscriptionPlans({ tenant, onTenantUpdated }: Subscript
       {error && (
         <div className="bg-red-500/10 border border-red-500/20 text-red-300 text-sm rounded-xl px-4 py-3">{error}</div>
       )}
-      {info && (
-        <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm rounded-xl px-4 py-3">{info}</div>
+      {(info || pendingInvoiceUrl) && (
+        <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 text-sm rounded-xl px-4 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <span>
+            {info ||
+              'Você possui uma fatura aguardando pagamento. Assim que o Pix ou cartão for confirmado, seu plano é liberado automaticamente!'}
+          </span>
+          {pendingInvoiceUrl && (
+            <a
+              href={pendingInvoiceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl shadow-md shrink-0 transition"
+            >
+              Abrir Fatura para Pagar
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          )}
+        </div>
       )}
 
       {/* Cards de planos */}

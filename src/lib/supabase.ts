@@ -15,13 +15,11 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 export function getServiceSupabase() {
   const serviceKeyEnv = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!serviceKeyEnv) {
-    console.error(
-      '[Supabase] SUPABASE_SERVICE_ROLE_KEY NÃO configurada: usando anon key como fallback. ' +
-        'Configure a variável na Vercel ANTES de aplicar o hardening de RLS (database/security_hardening.sql).'
+    throw new Error(
+      '[Supabase] SUPABASE_SERVICE_ROLE_KEY ausente no servidor. Configure a variável de ambiente para operar as rotas de backend com segurança.'
     );
   }
-  const serviceKey = serviceKeyEnv || supabaseAnonKey;
-  return createClient(supabaseUrl, serviceKey, {
+  return createClient(supabaseUrl, serviceKeyEnv, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,

@@ -15,9 +15,11 @@ import {
 export const maxDuration = 60;
 
 /**
- * Inicia a contratação de um plano: cria/atualiza o cliente no Asaas, cria a assinatura mensal
- * e devolve o link da fatura (Pix, boleto ou cartão). O plano só é ativado quando o
- * pagamento for CONFIRMADO pelo webhook do Asaas.
+ * Inicia a contratação ou troca de plano:
+ * - Cria/atualiza o cliente no Asaas;
+ * - NÃO cancela uma assinatura ativa antes da confirmação do novo pagamento (evita perder o plano se desistir no checkout);
+ * - Grava `erbots:<tenantId>:<plan>` no `externalReference` para validação exata no webhook;
+ * - Salva `pending_invoice_url` para abrir direto mesmo em navegadores mobile que bloqueiam pop-up.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -48,14 +50,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Empresa não encontrada.' }, { status: 404 });
     }
 
-    // CPF/CNPJ obrigatório (exigência do gateway e da nota fiscal)
     const doc = onlyDigits(String(cpf_cnpj || tenant.cpf_cnpj || ''));
     if (!isValidCpfCnpj(doc)) {
       return NextResponse.json({ error: 'Informe um CPF ou CNPJ válido para emitir a cobrança.' }, { status: 400 });
     }
 
-    // Já assinante ativo do mesmo plano e dentro do período
-    if (tenant.subscription_status === 'active' && tenant.plan === plan && tenant.billing_subscription_id) {
+    const hasActivePaidSub = Boolean(tenant.subscription_status === 'active' && tenant.billing_subscription_id);
+
+    if (hasActivePaidSub && tenant.plan === plan) {
       return NextResponse.json({ error: 'Você já possui este plano ativo.' }, { status: 409 });
     }
 
@@ -68,18 +70,21 @@ export async function POST(req: NextRequest) {
       externalReference: tenant.id,
     });
 
-    // 2. Se havia assinatura anterior (troca de plano), cancela a antiga para não cobrar em duplicidade
-    if (tenant.billing_subscription_id) {
-      await cancelSubscription(tenant.billing_subscription_id);
+    // 2. Limpa apenas checkout pendente anterior não pago (preserva assinatura ativa atual!)
+    if (tenant.pending_subscription_id && tenant.pending_subscription_id !== tenant.billing_subscription_id) {
+      await cancelSubscription(tenant.pending_subscription_id).catch(() => {});
+    }
+    if (!hasActivePaidSub && tenant.billing_subscription_id) {
+      await cancelSubscription(tenant.billing_subscription_id).catch(() => {});
     }
 
-    // 3. Nova assinatura
+    // 3. Nova assinatura com referência explícita do plano contratado
     const def = (await getPlansConfig())[plan];
     const subscription = await createSubscription({
       customerId,
       value: def.price,
       description: `ERBots - Plano ${def.name} (mensal)`,
-      externalReference: tenant.id,
+      externalReference: `erbots:${tenant.id}:${plan}`,
     });
 
     // Aguarda a primeira cobrança ser gerada para obter o link da fatura
@@ -89,15 +94,24 @@ export async function POST(req: NextRequest) {
       if (!invoiceUrl) await new Promise((r) => setTimeout(r, 800));
     }
 
+    // Se já tem assinatura ativa, mantém billing_subscription_id intacto e guarda a nova em pending_*
+    const updateData: Record<string, any> = {
+      cpf_cnpj: doc,
+      billing_customer_id: customerId,
+      pending_subscription_id: subscription.id,
+      pending_plan: plan,
+      pending_invoice_url: invoiceUrl,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (!hasActivePaidSub) {
+      updateData.billing_subscription_id = subscription.id;
+      updateData.billing_plan = plan;
+    }
+
     const { error: updErr } = await supabase
       .from('xerb_tenants')
-      .update({
-        cpf_cnpj: doc,
-        billing_customer_id: customerId,
-        billing_subscription_id: subscription.id,
-        billing_plan: plan,
-        updated_at: new Date().toISOString(),
-      })
+      .update(updateData)
       .eq('id', tenant.id);
 
     if (updErr) {

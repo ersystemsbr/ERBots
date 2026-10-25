@@ -1,17 +1,26 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
-import { Save, Bot, Clock, UserCheck, Sparkles, CheckCircle2 } from 'lucide-react';
+import { authFetch } from '@/lib/api-client';
+import { DEFAULT_HANDOFF_KEYWORDS } from '@/lib/ai/gemini';
+import { Save, Bot, Clock, UserCheck, Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
 
 interface BotSettingsFormProps {
   tenantId: string;
+}
+
+const LEGACY_SET = new Set(['atendente', 'humano', 'falar com atendente', 'pessoa', 'suporte']);
+
+function isLegacyKeywords(arr?: string[] | null): boolean {
+  if (!Array.isArray(arr) || arr.length !== LEGACY_SET.size) return false;
+  return arr.every((k) => LEGACY_SET.has(String(k || '').trim().toLowerCase()));
 }
 
 export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Campos do formulário
   const [botName, setBotName] = useState<string>('Assistente Virtual');
@@ -30,7 +39,7 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
 
   // Transbordo Humano
   const [handoffEnabled, setHandoffEnabled] = useState<boolean>(true);
-  const [keywordsStr, setKeywordsStr] = useState<string>('atendente, humano, falar com atendente, pessoa, suporte');
+  const [keywordsStr, setKeywordsStr] = useState<string>(DEFAULT_HANDOFF_KEYWORDS.slice(0, 8).join(', '));
   const [handoffMessage, setHandoffMessage] = useState<string>(
     'Com certeza! Estou transferindo seu atendimento para nossa equipe humana. Aguarde um instante que já vamos te responder.'
   );
@@ -58,11 +67,9 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
       if (!tenantId) return;
       setLoading(true);
       try {
-        const { data, error } = await supabase
-          .from('xerb_bot_settings')
-          .select('*')
-          .eq('tenant_id', tenantId)
-          .maybeSingle();
+        const res = await authFetch(`/api/tenant/bot-settings?tenant_id=${encodeURIComponent(tenantId)}`);
+        const json = await res.json().catch(() => ({}));
+        const data = json?.settings;
 
         if (data) {
           setBotName(data.bot_name || 'Assistente Virtual');
@@ -82,8 +89,12 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
           }
 
           setHandoffEnabled(data.human_handoff_enabled !== false);
-          if (Array.isArray(data.human_handoff_keywords)) {
-            setKeywordsStr(data.human_handoff_keywords.join(', '));
+          if (Array.isArray(data.human_handoff_keywords) && data.human_handoff_keywords.length > 0) {
+            setKeywordsStr(
+              isLegacyKeywords(data.human_handoff_keywords)
+                ? DEFAULT_HANDOFF_KEYWORDS.slice(0, 8).join(', ')
+                : data.human_handoff_keywords.join(', ')
+            );
           }
           setHandoffMessage(
             data.human_handoff_message ||
@@ -103,6 +114,7 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
     e.preventDefault();
     setSaving(true);
     setSavedSuccess(false);
+    setSaveError(null);
 
     try {
       const keywordsArray = keywordsStr
@@ -110,35 +122,37 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
         .map((k) => k.trim())
         .filter(Boolean);
 
-      const payload = {
-        tenant_id: tenantId,
-        bot_name: botName,
-        tone,
-        is_active: isActive,
-        system_prompt: systemPrompt,
-        business_hours: {
-          enabled: hoursEnabled,
-          days: selectedDays,
-          start: startTime,
-          end: endTime,
-          out_of_hours_message: outOfHoursMessage,
-        },
-        human_handoff_enabled: handoffEnabled,
-        human_handoff_keywords: keywordsArray,
-        human_handoff_message: handoffMessage,
-        updated_at: new Date().toISOString(),
-      };
+      const res = await authFetch('/api/tenant/bot-settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          bot_name: botName,
+          tone,
+          is_active: isActive,
+          system_prompt: systemPrompt,
+          business_hours: {
+            enabled: hoursEnabled,
+            days: selectedDays,
+            start: startTime,
+            end: endTime,
+            out_of_hours_message: outOfHoursMessage,
+          },
+          human_handoff_enabled: handoffEnabled,
+          human_handoff_keywords: keywordsArray,
+          human_handoff_message: handoffMessage,
+        }),
+      });
 
-      const { error } = await supabase
-        .from('xerb_bot_settings')
-        .upsert(payload, { onConflict: 'tenant_id' });
-
-      if (error) throw error;
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || 'Não foi possível salvar as configurações.');
+      }
 
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 4000);
     } catch (err: any) {
-      alert(`Erro ao salvar: ${err?.message}`);
+      setSaveError(err?.message || 'Erro ao salvar configurações.');
     } finally {
       setSaving(false);
     }
@@ -154,6 +168,13 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
 
   return (
     <form onSubmit={handleSave} className="space-y-6">
+      {saveError && (
+        <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300 flex items-center gap-2.5">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{saveError}</span>
+        </div>
+      )}
+
       {/* Bloco 1: Identidade e Personalidade */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl">
         <div className="flex items-center justify-between pb-6 border-b border-slate-800">
@@ -188,6 +209,7 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
             </label>
             <input
               type="text"
+              maxLength={80}
               value={botName}
               onChange={(e) => setBotName(e.target.value)}
               placeholder="Ex: Sofia, Lucas, Julia da Clínica X"
@@ -213,12 +235,16 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
           </div>
 
           <div className="md:col-span-2">
-            <label className="block text-sm font-semibold text-slate-300 mb-2 flex items-center gap-1.5">
-              <Sparkles className="w-4 h-4 text-emerald-400" />
-              Instruções Personalizadas do Dono do Negócio
+            <label className="block text-sm font-semibold text-slate-300 mb-2 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-emerald-400" />
+                Instruções Personalizadas do Dono do Negócio
+              </span>
+              <span className="text-xs font-normal text-slate-500">{systemPrompt.length}/4000</span>
             </label>
             <textarea
               rows={4}
+              maxLength={4000}
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
               placeholder="Ex: 'Sempre enfatize que nossas consultas devem ser agendadas com 24h de antecedência. Não passamos orçamento sem avaliação prévia. Seja caloroso.'"
@@ -228,20 +254,20 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
         </div>
       </div>
 
-      {/* Bloco 2: Horário de Atendimento */}
+      {/* Bloco 2: Pausar IA Fora do Expediente */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl">
-        <div className="flex items-center justify-between pb-6 border-b border-slate-800">
+        <div className="flex items-center justify-between pb-6 border-b border-slate-800 gap-4">
           <div>
             <h2 className="text-xl font-bold text-white flex items-center gap-2">
               <Clock className="w-6 h-6 text-emerald-400" />
-              Horário de Atendimento
+              Pausar IA Fora do Expediente (Opcional)
             </h2>
             <p className="text-slate-400 text-sm mt-1">
-              Defina os dias e horários em que a IA responde. Fora deste horário, ela envia um aviso automático.
+              Por padrão a IA atende <strong>24h por dia</strong>. Ative apenas se preferir enviar uma mensagem fixa de ausência fora do horário comercial (suporta turnos noturnos, ex.: 18:00 às 02:00).
             </p>
           </div>
 
-          <label className="flex items-center gap-3 cursor-pointer">
+          <label className="flex items-center gap-3 cursor-pointer shrink-0">
             <input
               type="checkbox"
               checked={hoursEnabled}
@@ -256,7 +282,7 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
           <div className="space-y-6 pt-6">
             <div>
               <label className="block text-sm font-semibold text-slate-300 mb-2">
-                Dias de Atendimento
+                Dias em que a IA Atende Normalmente
               </label>
               <div className="flex flex-wrap gap-2">
                 {daysList.map((d) => {
@@ -307,10 +333,11 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
 
             <div>
               <label className="block text-sm font-semibold text-slate-300 mb-1">
-                Mensagem Fora do Expediente
+                Mensagem Automática Fora do Expediente
               </label>
               <input
                 type="text"
+                maxLength={500}
                 value={outOfHoursMessage}
                 onChange={(e) => setOutOfHoursMessage(e.target.value)}
                 className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500 text-sm"
@@ -329,7 +356,7 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
               Transbordo para Atendente Humano
             </h2>
             <p className="text-slate-400 text-sm mt-1">
-              Permita que a conversa seja transferida para uma pessoa real caso o cliente peça ou precise de suporte.
+              Permita que a conversa seja transferida para sua equipe e dispare alerta no seu WhatsApp quando o cliente pedir ajuda humana.
             </p>
           </div>
 
@@ -348,17 +375,17 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
           <div className="space-y-6 pt-6">
             <div>
               <label className="block text-sm font-semibold text-slate-300 mb-1">
-                Palavras-chave que acionam a transferência (separadas por vírgula)
+                Frases/palavras exatas que acionam a transferência imediata (separadas por vírgula)
               </label>
               <input
                 type="text"
                 value={keywordsStr}
                 onChange={(e) => setKeywordsStr(e.target.value)}
-                placeholder="atendente, humano, falar com atendente, suporte"
+                placeholder="atendente, atendimento humano, falar com humano, falar com o gerente"
                 className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500 text-sm"
               />
               <span className="text-xs text-slate-500 mt-1 block">
-                Quando o cliente mandar qualquer uma dessas palavras, o robô pausa e transfere o atendimento.
+                Use expressões claras (evite palavras genéricas isoladas como &ldquo;pessoa&rdquo; ou &ldquo;suporte&rdquo;). A própria IA também transfere automaticamente quando percebe necessidade.
               </span>
             </div>
 
@@ -368,6 +395,7 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
               </label>
               <input
                 type="text"
+                maxLength={500}
                 value={handoffMessage}
                 onChange={(e) => setHandoffMessage(e.target.value)}
                 className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500 text-sm"
@@ -377,7 +405,7 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
         )}
       </div>
 
-      {/* Botão de Salvar Flutuante ou Fixo */}
+      {/* Botão de Salvar */}
       <div className="flex items-center justify-end gap-4 pt-4">
         {savedSuccess && (
           <span className="text-emerald-400 text-sm font-medium flex items-center gap-1.5 animate-fadeIn">

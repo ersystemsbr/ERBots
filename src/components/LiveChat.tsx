@@ -69,6 +69,8 @@ export default function LiveChat({ tenantId }: LiveChatProps) {
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [mobileShowChat, setMobileShowChat] = useState<boolean>(false);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [hasOlderMessages, setHasOlderMessages] = useState<boolean>(false);
+  const [loadingOlder, setLoadingOlder] = useState<boolean>(false);
   const [loadingConvs, setLoadingConvs] = useState<boolean>(true);
   const [loadingMessages, setLoadingMessages] = useState<boolean>(false);
   const [inputText, setInputText] = useState<string>('');
@@ -150,15 +152,17 @@ export default function LiveChat({ tenantId }: LiveChatProps) {
     async (convId: string, showSpinner = false) => {
       if (showSpinner) setLoadingMessages(true);
       try {
+        // Busca as 200 mensagens MAIS RECENTES (desc) e inverte para ordem cronológica na tela
         const { data } = await supabase
           .from('xerb_messages')
           .select('id, conversation_id, sender, content, created_at')
           .eq('conversation_id', convId)
-          .order('created_at', { ascending: true })
+          .order('created_at', { ascending: false })
           .limit(200);
 
         if (data) {
-          setMessages(data);
+          setHasOlderMessages(data.length === 200);
+          setMessages([...data].reverse());
           setTimeout(scrollToBottom, 80);
         }
       } catch (err) {
@@ -169,6 +173,36 @@ export default function LiveChat({ tenantId }: LiveChatProps) {
     },
     [scrollToBottom]
   );
+
+  const handleLoadOlderMessages = async () => {
+    if (!selectedConvId || messages.length === 0 || loadingOlder) return;
+    setLoadingOlder(true);
+    try {
+      const oldestCreatedAt = messages[0].created_at;
+      const { data } = await supabase
+        .from('xerb_messages')
+        .select('id, conversation_id, sender, content, created_at')
+        .eq('conversation_id', selectedConvId)
+        .lt('created_at', oldestCreatedAt)
+        .order('created_at', { ascending: false })
+        .limit(200);
+
+      if (data && data.length > 0) {
+        setHasOlderMessages(data.length === 200);
+        const olderAsc = [...data].reverse();
+        setMessages((prev) => {
+          const existingIds = new Set(prev.map((m) => m.id));
+          return [...olderAsc.filter((m) => !existingIds.has(m.id)), ...prev];
+        });
+      } else {
+        setHasOlderMessages(false);
+      }
+    } catch (err) {
+      console.error('Erro ao carregar mensagens anteriores:', err);
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
 
   // 1. Carrega conversas iniciais + assina Supabase Realtime para xerb_conversations
   useEffect(() => {
@@ -598,6 +632,18 @@ export default function LiveChat({ tenantId }: LiveChatProps) {
 
             {/* Mensagens */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {hasOlderMessages && messages.length > 0 && (
+                <div className="text-center pb-2">
+                  <button
+                    type="button"
+                    onClick={handleLoadOlderMessages}
+                    disabled={loadingOlder}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-300 transition disabled:opacity-50"
+                  >
+                    {loadingOlder ? 'Carregando...' : 'Carregar mensagens anteriores'}
+                  </button>
+                </div>
+              )}
               {loadingMessages && messages.length === 0 ? (
                 <div className="text-center text-xs text-slate-500 pt-8">Carregando histórico...</div>
               ) : messages.length === 0 ? (

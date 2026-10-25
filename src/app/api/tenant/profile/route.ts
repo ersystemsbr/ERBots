@@ -8,7 +8,7 @@ export const maxDuration = 30;
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
-    const { tenant_id, name, segment, phone, email, slug, cpf_cnpj } = body;
+    const { tenant_id, name, segment, phone, alert_phone, email, slug, cpf_cnpj } = body;
 
     // Autenticação + autorização por posse (user_id) — o e-mail de contato NÃO define permissão
     const guard = await requireTenantAccess(req, tenant_id);
@@ -27,6 +27,7 @@ export async function PATCH(req: NextRequest) {
     }
     if (segment !== undefined) updatePayload.segment = String(segment).trim().slice(0, 80);
     if (phone !== undefined) updatePayload.phone = String(phone).trim().slice(0, 30) || null;
+    if (alert_phone !== undefined) updatePayload.alert_phone = String(alert_phone).trim().slice(0, 30) || null;
     if (email !== undefined) {
       const cleanEmail = String(email).trim().toLowerCase().slice(0, 160);
       if (cleanEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
@@ -34,15 +35,15 @@ export async function PATCH(req: NextRequest) {
       }
       updatePayload.email = cleanEmail || null;
     }
-    if (slug !== undefined) {
+    // Slug só pode ser alterado por Super Admin
+    if (slug !== undefined && guard.ctx.isSuperAdmin) {
       const cleanSlug = String(slug)
         .toLowerCase()
         .replace(/[^a-z0-9_-]/g, '')
         .slice(0, 60);
-      if (!cleanSlug) {
-        return NextResponse.json({ error: 'Identificador (slug) inválido.' }, { status: 400 });
+      if (cleanSlug) {
+        updatePayload.slug = cleanSlug;
       }
-      updatePayload.slug = cleanSlug;
     }
 
     if (cpf_cnpj !== undefined) {

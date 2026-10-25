@@ -218,7 +218,53 @@ export async function logoutInstance(instanceName: string): Promise<boolean> {
 }
 
 /**
- * Envia uma mensagem de texto simples pelo WhatsApp
+ * Extrai identificadores normalizados de um evento da Evolution API v2.3+,
+ * tratando leads de anúncios Meta/Instagram (@lid) e dispositivos múltiplos (:0).
+ */
+export function parseWhatsAppAddress(key: any, data?: any): {
+  remoteJid: string;
+  contactPhone: string;
+  isLid: boolean;
+} {
+  const rawJid = String(key?.remoteJid || '').trim();
+  const isLid = rawJid.endsWith('@lid');
+
+  if (isLid) {
+    const lidBase = rawJid.replace(/@lid$/i, '').replace(/:\d+$/, '').replace(/\D/g, '');
+    const normalizedLid = lidBase ? `${lidBase}@lid` : rawJid;
+
+    const altRaw = String(
+      key?.remoteJidAlt || key?.senderPn || data?.senderPn || data?.key?.remoteJidAlt || ''
+    ).trim();
+    const altDigits = altRaw
+      .replace(/@s\.whatsapp\.net$/i, '')
+      .replace(/@c\.us$/i, '')
+      .replace(/:\d+$/, '')
+      .replace(/\D/g, '');
+
+    return {
+      remoteJid: normalizedLid,
+      contactPhone: altDigits.length >= 10 ? altDigits : `LID:${lidBase || 'lead'}`,
+      isLid: true,
+    };
+  }
+
+  const phoneDigits = rawJid
+    .replace(/@s\.whatsapp\.net$/i, '')
+    .replace(/@c\.us$/i, '')
+    .replace(/:\d+$/, '')
+    .replace(/\D/g, '');
+
+  return {
+    remoteJid: phoneDigits ? `${phoneDigits}@s.whatsapp.net` : rawJid,
+    contactPhone: phoneDigits,
+    isLid: false,
+  };
+}
+
+/**
+ * Envia uma mensagem de texto simples pelo WhatsApp.
+ * Suporta tanto números tradicionais (@s.whatsapp.net / dígitos) quanto leads @lid (Meta Ads).
  */
 export async function sendTextMessage(
   instanceName: string,
@@ -228,8 +274,21 @@ export async function sendTextMessage(
   const { apiUrl, apiKey } = await getEvolutionConfig();
   if (!apiUrl || !apiKey) return false;
 
-  const cleanPhone = toPhoneOrJid.replace(/\D/g, '');
-  if (!cleanPhone) return false;
+  const trimmed = (toPhoneOrJid || '').trim();
+  let destination = '';
+  if (/@lid$/i.test(trimmed)) {
+    const lidDigits = trimmed.replace(/@lid$/i, '').replace(/:\d+$/, '').replace(/\D/g, '');
+    if (!lidDigits) return false;
+    destination = `${lidDigits}@lid`;
+  } else {
+    const cleanPhone = trimmed
+      .replace(/@s\.whatsapp\.net$/i, '')
+      .replace(/@c\.us$/i, '')
+      .replace(/:\d+$/, '')
+      .replace(/\D/g, '');
+    if (!cleanPhone) return false;
+    destination = cleanPhone;
+  }
 
   try {
     const res = await fetch(`${apiUrl}/message/sendText/${instanceName}`, {
@@ -239,7 +298,7 @@ export async function sendTextMessage(
         apikey: apiKey,
       },
       body: JSON.stringify({
-        number: cleanPhone,
+        number: destination,
         text,
         options: {
           delay: 1000,
@@ -247,6 +306,7 @@ export async function sendTextMessage(
           linkPreview: false,
         },
       }),
+      signal: AbortSignal.timeout(15000),
     });
 
     if (!res.ok) {
@@ -277,6 +337,7 @@ export async function getMediaBase64(
       method: 'POST',
       headers: { 'Content-Type': 'application/json', apikey: apiKey },
       body: JSON.stringify({ message: { key: messageKey }, convertToMp4: false }),
+      signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) {
       console.warn(`[Evolution] Falha ao baixar mídia (${res.status}):`, (await res.text()).slice(0, 200));
@@ -481,7 +542,8 @@ export async function findHealthyNotifierInstance(excludeInstance?: string): Pro
     const adminOpen = openErbots.find((i) => adminNames.has(i.name));
     if (adminOpen) return adminOpen.name;
 
-    return openErbots[0].name;
+    // Segurança multi-tenant: NUNCA usar instância de outro cliente comum para enviar alertas
+    return null;
   } catch {
     return null;
   }

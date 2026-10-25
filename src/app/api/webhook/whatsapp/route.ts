@@ -4,6 +4,7 @@ import {
   sendTextMessage,
   getMediaBase64,
   normalizeBrPhone,
+  parseWhatsAppAddress,
   tryReconnectInstance,
   findHealthyNotifierInstance,
 } from '@/lib/evolution';
@@ -44,6 +45,8 @@ type Content =
   | { kind: 'text'; text: string }
   | { kind: 'audio'; seconds: number; mimeType: string }
   | { kind: 'image'; caption: string; mimeType: string }
+  | { kind: 'document'; fileName: string; caption: string; mimeType: string }
+  | { kind: 'media_notice'; label: string }
   | { kind: 'ignored' };
 
 function unwrapMessage(raw: any): any {
@@ -87,6 +90,28 @@ function extractContent(raw: any): Content {
       caption: String(m.imageMessage.caption || ''),
       mimeType: String(m.imageMessage.mimetype || 'image/jpeg').split(';')[0],
     };
+  }
+  if (m.documentMessage) {
+    const fileName = String(m.documentMessage.fileName || m.documentMessage.title || 'arquivo').slice(0, 120);
+    return {
+      kind: 'document',
+      fileName,
+      caption: String(m.documentMessage.caption || ''),
+      mimeType: String(m.documentMessage.mimetype || 'application/octet-stream').split(';')[0],
+    };
+  }
+  if (m.videoMessage) {
+    const cap = String(m.videoMessage.caption || '').trim();
+    return { kind: 'media_notice', label: `🎥 [Vídeo recebido]${cap ? ` ${cap}` : ''}` };
+  }
+  if (m.locationMessage || m.liveLocationMessage) {
+    const loc = m.locationMessage || m.liveLocationMessage;
+    const locName = String(loc?.name || loc?.address || '').trim();
+    return { kind: 'media_notice', label: `📍 [Localização compartilhada${locName ? `: ${locName}` : ''}]` };
+  }
+  if (m.contactMessage || m.contactsArrayMessage) {
+    const cname = String(m.contactMessage?.displayName || '').trim();
+    return { kind: 'media_notice', label: `👤 [Contato compartilhado${cname ? `: ${cname}` : ''}]` };
   }
   return { kind: 'ignored' };
 }
@@ -166,25 +191,26 @@ async function isOwnEcho(db: Db, conversationId: string, text: string): Promise<
 // ---------------------------------------------------------------------------
 async function notifyOwnerOfHandoff(args: {
   instanceName: string;
-  tenant: { phone?: string | null; name?: string | null };
+  tenant: { phone?: string | null; alert_phone?: string | null; name?: string | null };
   customerName: string;
   customerPhone: string;
   lastMessage: string;
 }) {
   try {
-    const owner = normalizeBrPhone(args.tenant.phone);
+    const owner = normalizeBrPhone(args.tenant.alert_phone) || normalizeBrPhone(args.tenant.phone);
     if (!owner || samePhone(owner, args.customerPhone)) return;
 
-    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/+$/, '');
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://www.erbots.com.br').replace(/\/+$/, '');
     const preview = args.lastMessage.length > 220 ? `${args.lastMessage.slice(0, 220)}…` : args.lastMessage;
+    const phoneDisplay = args.customerPhone.startsWith('LID:') ? args.customerPhone : `+${args.customerPhone}`;
     const lines = [
       '🔔 *ERBots – atendimento humano solicitado*',
       '',
-      `Cliente: *${args.customerName || args.customerPhone}* (+${args.customerPhone})`,
+      `Cliente: *${args.customerName || args.customerPhone}* (${phoneDisplay})`,
       `Última mensagem: "${preview}"`,
       '',
       'A IA está pausada nesta conversa. Responda direto pelo WhatsApp' +
-        (appUrl ? ` ou pelo painel: ${appUrl}/dashboard` : '.'),
+        ` ou pelo painel: ${appUrl}/dashboard`,
       `(Se ninguém responder em ${HUMAN_TIMEOUT_HOURS}h, a IA volta a atender sozinha.)`,
     ];
     await sendTextMessage(args.instanceName, owner, lines.join('\n'));
@@ -202,13 +228,19 @@ async function handleOwnerMessage(
 ) {
   const { tenant, tenantId, remoteJid, cleanPhone, waId, content } = params;
 
-  // Mensagens para o próprio número do dono (ex.: avisos de transbordo) não são conversas de cliente
-  if (samePhone(cleanPhone, normalizeBrPhone(tenant.phone))) {
+  // Mensagens para o próprio número do dono / alerta (ex.: avisos de transbordo) não são conversas de cliente
+  if (
+    !cleanPhone.startsWith('LID:') &&
+    (samePhone(cleanPhone, normalizeBrPhone(tenant.phone)) ||
+      samePhone(cleanPhone, normalizeBrPhone(tenant.alert_phone)))
+  ) {
     return NextResponse.json({ skipped: true, reason: 'owner self chat' });
   }
 
   let text = '';
   if (content.kind === 'text') text = content.text.trim();
+  else if (content.kind === 'media_notice') text = content.label;
+  else if (content.kind === 'document') text = `📎 [Documento enviado pelo atendente: ${content.fileName}]`;
   else if (content.kind === 'audio' || content.kind === 'image') text = '📎 [Mídia enviada pelo atendente]';
   if (!text) return NextResponse.json({ skipped: true, reason: 'fromMe ignored' });
 
@@ -383,7 +415,7 @@ export async function POST(req: NextRequest) {
 
       const { data: tenantInfo } = await supabase
         .from('xerb_tenants')
-        .select('id, name, email, phone')
+        .select('id, name, email, phone, alert_phone')
         .eq('id', instRow.tenant_id)
         .maybeSingle();
 
@@ -404,7 +436,7 @@ export async function POST(req: NextRequest) {
           .update({ last_disconnect_alert_at: nowIso })
           .eq('id', instRow.id);
 
-        const ownerPhone = normalizeBrPhone(tenantInfo?.phone);
+        const ownerPhone = normalizeBrPhone(tenantInfo?.alert_phone) || normalizeBrPhone(tenantInfo?.phone);
         const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://www.erbots.com.br').replace(/\/+$/, '');
         const notifier = await findHealthyNotifierInstance(instanceName);
 
@@ -454,8 +486,8 @@ export async function POST(req: NextRequest) {
     const pushName = data.pushName || '';
     const waId: string | null = key.id || null;
 
-    const remoteJid = key.remoteJid || '';
-    if (!remoteJid || remoteJid.includes('@g.us') || remoteJid.includes('@broadcast')) {
+    const rawRemoteJid = String(key.remoteJid || '').trim();
+    if (!rawRemoteJid || rawRemoteJid.includes('@g.us') || rawRemoteJid.includes('@broadcast')) {
       return NextResponse.json({ skipped: true, reason: 'Group or broadcast' });
     }
 
@@ -477,13 +509,13 @@ export async function POST(req: NextRequest) {
     }
 
     const tenantId = instanceRow.tenant_id;
-    const cleanPhone = remoteJid.replace(/@s\.whatsapp\.net$/, '').replace(/:\d+$/, '').replace(/\D/g, '');
+    const { remoteJid, contactPhone: cleanPhone } = parseWhatsAppAddress(key, data);
 
     // Busca dados do tenant, bot_settings e knowledge_base
     const [tenantRes, botSettingsRes, kbRes] = await Promise.all([
       supabase
         .from('xerb_tenants')
-        .select('id, name, segment, phone, plan, subscription_status, trial_ends_at, is_super_admin')
+        .select('id, name, segment, phone, alert_phone, plan, subscription_status, trial_ends_at, is_super_admin')
         .eq('id', tenantId)
         .single(),
       supabase.from('xerb_bot_settings').select('*').eq('tenant_id', tenantId).maybeSingle(),
@@ -517,21 +549,30 @@ export async function POST(req: NextRequest) {
     const gate = await checkAiGate(supabase, tenant);
     const canUseAI = gate.allowed && botSettings.is_active !== false;
 
-    // 4. Texto da mensagem (áudio e imagem são interpretados pelo Gemini)
+    // 4. Texto da mensagem (áudio, imagem e PDF são interpretados pelo Gemini; outros arquivos aparecem no LiveChat)
     let userText = '';
     let mediaFailed = false;
 
     if (content.kind === 'text') {
       userText = content.text.trim();
+    } else if (content.kind === 'media_notice') {
+      userText = content.label;
+    } else if (content.kind === 'document' && content.mimeType !== 'application/pdf') {
+      userText = `📄 [Documento recebido: ${content.fileName}]${content.caption ? ` ${content.caption}` : ''}`;
     } else if (!canUseAI) {
-      userText = content.kind === 'audio' ? '🎤 [Áudio recebido]' : `🖼️ [Imagem recebida]${content.caption ? ` ${content.caption}` : ''}`;
+      if (content.kind === 'audio') userText = '🎤 [Áudio recebido]';
+      else if (content.kind === 'document') {
+        userText = `📄 [PDF recebido: ${content.fileName}]${content.caption ? ` ${content.caption}` : ''}`;
+      } else {
+        userText = `🖼️ [Imagem recebida]${content.caption ? ` ${content.caption}` : ''}`;
+      }
     } else if (content.kind === 'audio' && content.seconds > MAX_AUDIO_SECONDS) {
       userText = '🎤 [Áudio muito longo]';
       mediaFailed = true;
     } else {
       const media = (data.message?.base64
         ? { base64: String(data.message.base64), mimeType: content.mimeType }
-        : await getMediaBase64(instanceName, { id: key.id, remoteJid, fromMe: false })) as
+        : await getMediaBase64(instanceName, { id: key.id, remoteJid: rawRemoteJid, fromMe: false })) as
         | { base64: string; mimeType: string }
         | null;
 
@@ -542,16 +583,22 @@ export async function POST(req: NextRequest) {
               kind: content.kind,
               base64: media.base64,
               mimeType: media.mimeType || content.mimeType,
-              caption: content.kind === 'image' ? content.caption : undefined,
+              caption: content.kind === 'image' || content.kind === 'document' ? content.caption : undefined,
+              fileName: content.kind === 'document' ? content.fileName : undefined,
             })
           : null;
 
       if (result) {
         await recordUsage(supabase, tenantId, { tokensIn: result.tokensIn, tokensOut: result.tokensOut });
-        userText =
-          content.kind === 'audio'
-            ? `🎤 ${result.text}`
-            : `🖼️ [Imagem: ${result.text}]${content.caption ? ` Legenda: ${content.caption}` : ''}`;
+        if (content.kind === 'audio') {
+          userText = `🎤 ${result.text}`;
+        } else if (content.kind === 'document') {
+          userText = `📄 [PDF ${content.fileName}: ${result.text}]${content.caption ? ` Legenda: ${content.caption}` : ''}`;
+        } else {
+          userText = `🖼️ [Imagem: ${result.text}]${content.caption ? ` Legenda: ${content.caption}` : ''}`;
+        }
+      } else if (content.kind === 'document') {
+        userText = `📄 [PDF recebido: ${content.fileName}]${content.caption ? ` ${content.caption}` : ''}`;
       } else {
         userText = content.kind === 'audio' ? '🎤 [Áudio não pôde ser interpretado]' : '🖼️ [Imagem recebida]';
         mediaFailed = content.kind === 'audio';
@@ -564,7 +611,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ skipped: true, reason: 'No text extracted' });
     }
 
-    // 5. Cria ou recupera a Conversa no banco
+    // 5. Cria ou recupera a Conversa no banco (tolerante a concorrência no primeiro contato)
     let { data: conversation } = await supabase
       .from('xerb_conversations')
       .select('*')
@@ -573,6 +620,7 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (!conversation) {
+      const nowIso = new Date().toISOString();
       const { data: newConv, error: convErr } = await supabase
         .from('xerb_conversations')
         .insert({
@@ -582,21 +630,32 @@ export async function POST(req: NextRequest) {
           contact_phone: cleanPhone,
           handling_status: 'AI',
           last_message: userText,
-          last_message_at: new Date().toISOString(),
+          last_message_at: nowIso,
           unread_count: 1,
         })
         .select()
         .single();
 
-      if (convErr) {
+      if (convErr && (convErr as any).code === '23505') {
+        const { data: racedConv } = await supabase
+          .from('xerb_conversations')
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .eq('remote_jid', remoteJid)
+          .maybeSingle();
+        conversation = racedConv;
+      } else if (convErr) {
         console.error('[Webhook] Erro ao criar conversa:', convErr);
+      } else {
+        conversation = newConv;
       }
-      conversation = newConv;
     } else {
       await supabase
         .from('xerb_conversations')
         .update({
           contact_name: pushName || conversation.contact_name,
+          contact_phone:
+            cleanPhone && !cleanPhone.startsWith('LID:') ? cleanPhone : conversation.contact_phone || cleanPhone,
           last_message: userText,
           last_message_at: new Date().toISOString(),
           unread_count: (conversation.unread_count || 0) + 1,
@@ -631,7 +690,12 @@ export async function POST(req: NextRequest) {
         .limit(1)
         .maybeSingle();
 
-      const lastOutAt = lastOut?.created_at ? new Date(lastOut.created_at).getTime() : 0;
+      const fallbackAnchor = conversation.updated_at || conversation.created_at;
+      const lastOutAt = lastOut?.created_at
+        ? new Date(lastOut.created_at).getTime()
+        : fallbackAnchor
+        ? new Date(fallbackAnchor).getTime()
+        : 0;
       if (lastOutAt && Date.now() - lastOutAt > HUMAN_TIMEOUT_HOURS * HOUR_MS) {
         // Ninguém respondeu: devolve a conversa para a IA
         await supabase
@@ -744,6 +808,16 @@ export async function POST(req: NextRequest) {
       if (already && already.length) {
         return NextResponse.json({ success: true, skipped: true, reason: 'out_of_hours_cooldown' });
       }
+    }
+
+    // 9.3 Revalida se o dono assumiu a conversa enquanto a IA gerava a resposta
+    const { data: convBeforeSend } = await supabase
+      .from('xerb_conversations')
+      .select('handling_status')
+      .eq('id', conversation.id)
+      .maybeSingle();
+    if (convBeforeSend?.handling_status === 'HUMAN') {
+      return NextResponse.json({ success: true, handledBy: 'HUMAN', reason: 'taken_over_during_generation' });
     }
 
     // 10. Grava a resposta ANTES de enviar (permite reconhecer o eco do envio) e despacha

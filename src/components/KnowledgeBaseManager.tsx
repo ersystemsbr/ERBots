@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import React, { useState, useEffect, useCallback } from 'react';
+import { authFetch } from '@/lib/api-client';
 import { SEGMENT_TEMPLATES, DEFAULT_TEMPLATES, KnowledgeTemplateItem } from '@/lib/segment-templates';
 import { BookOpen, Plus, Trash2, Edit2, Sparkles, X, CheckCircle2, AlertCircle } from 'lucide-react';
 
@@ -44,27 +44,25 @@ export default function KnowledgeBaseManager({ tenantId, tenantSegment }: Knowle
     setTimeout(() => setFeedback(null), 4000);
   };
 
-  const fetchItems = async () => {
+  const fetchItems = useCallback(async () => {
     if (!tenantId) return;
     setLoading(true);
     try {
-      const { data } = await supabase
-        .from('xerb_knowledge_base')
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .order('created_at', { ascending: false });
-
-      if (data) setItems(data);
+      const res = await authFetch(`/api/tenant/knowledge-base?tenant_id=${encodeURIComponent(tenantId)}`);
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(json.items)) {
+        setItems(json.items);
+      }
     } catch (err) {
       console.error('Erro ao carregar base de conhecimento:', err);
     } finally {
       setLoading(false);
     }
-  };
+  }, [tenantId]);
 
   useEffect(() => {
     fetchItems();
-  }, [tenantId]);
+  }, [fetchItems]);
 
   useEffect(() => {
     if (tenantSegment && SEGMENT_TEMPLATES[tenantSegment]) {
@@ -91,23 +89,34 @@ export default function KnowledgeBaseManager({ tenantId, tenantSegment }: Knowle
   const handleDelete = async (id: string) => {
     if (!confirm('Deseja realmente excluir esta informação da base de conhecimento?')) return;
     try {
-      const { error } = await supabase.from('xerb_knowledge_base').delete().eq('id', id);
-      if (error) throw error;
+      const res = await authFetch(
+        `/api/tenant/knowledge-base?tenant_id=${encodeURIComponent(tenantId)}&id=${encodeURIComponent(id)}`,
+        { method: 'DELETE' }
+      );
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d?.error || 'Erro ao excluir item.');
+      }
       setItems(items.filter((i) => i.id !== id));
       showNotice('success', 'Item removido da Base de Conhecimento.');
-    } catch {
-      showNotice('error', 'Erro ao excluir item.');
+    } catch (err: any) {
+      showNotice('error', err?.message || 'Erro ao excluir item.');
     }
   };
 
   const handleToggleActive = async (item: KnowledgeItem) => {
     try {
       const nextState = !item.is_active;
-      const { error } = await supabase
-        .from('xerb_knowledge_base')
-        .update({ is_active: nextState })
-        .eq('id', item.id);
-      if (error) throw error;
+      const res = await authFetch('/api/tenant/knowledge-base', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          id: item.id,
+          is_active: nextState,
+        }),
+      });
+      if (!res.ok) throw new Error('Falha ao atualizar status.');
 
       setItems(items.map((i) => (i.id === item.id ? { ...i, is_active: nextState } : i)));
     } catch (err) {
@@ -122,29 +131,29 @@ export default function KnowledgeBaseManager({ tenantId, tenantSegment }: Knowle
     setSaving(true);
 
     try {
-      if (editingId) {
-        const { error } = await supabase
-          .from('xerb_knowledge_base')
-          .update({
-            category,
-            title,
-            content,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', editingId);
+      const res = await authFetch('/api/tenant/knowledge-base', {
+        method: editingId ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          editingId
+            ? {
+                tenant_id: tenantId,
+                id: editingId,
+                category,
+                title: title.trim(),
+                content: content.trim(),
+              }
+            : {
+                tenant_id: tenantId,
+                category,
+                title: title.trim(),
+                content: content.trim(),
+              }
+        ),
+      });
 
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from('xerb_knowledge_base').insert({
-          tenant_id: tenantId,
-          category,
-          title,
-          content,
-          is_active: true,
-        });
-
-        if (error) throw error;
-      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Não foi possível salvar a informação.');
 
       setShowForm(false);
       await fetchItems();
@@ -168,16 +177,16 @@ export default function KnowledgeBaseManager({ tenantId, tenantSegment }: Knowle
         return;
       }
 
-      const payload = newOnes.map((t) => ({
-        tenant_id: tenantId,
-        category: t.category,
-        title: t.title,
-        content: t.content,
-        is_active: true,
-      }));
-
-      const { error } = await supabase.from('xerb_knowledge_base').insert(payload);
-      if (error) throw error;
+      const res = await authFetch('/api/tenant/knowledge-base', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          items: newOnes,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Falha ao importar modelos.');
 
       setShowTemplatesModal(false);
       await fetchItems();
@@ -461,6 +470,7 @@ export default function KnowledgeBaseManager({ tenantId, tenantSegment }: Knowle
                 </label>
                 <input
                   type="text"
+                  maxLength={160}
                   placeholder="Ex: Como funciona a garantia? / Limpeza de Pele"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
@@ -470,11 +480,13 @@ export default function KnowledgeBaseManager({ tenantId, tenantSegment }: Knowle
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Resposta ou Descrição Detalhada
+                <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center justify-between">
+                  <span>Resposta ou Descrição Detalhada</span>
+                  <span className="text-[11px] font-normal text-slate-500">{content.length}/3000</span>
                 </label>
                 <textarea
                   rows={5}
+                  maxLength={3000}
                   placeholder="Explique os detalhes, valores, condições e orientações para o cliente..."
                   value={content}
                   onChange={(e) => setContent(e.target.value)}

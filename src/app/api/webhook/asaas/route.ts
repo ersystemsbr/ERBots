@@ -3,6 +3,7 @@ import { timingSafeEqual } from 'crypto';
 import { getServiceSupabase } from '@/lib/supabase';
 import { BILLING_PERIOD_DAYS, isPaidPlan, type PaidPlanId, type PlanDefinition, type PlanId } from '@/lib/plans';
 import { getPlansConfig } from '@/lib/billing/plans-config';
+import { cancelSubscription } from '@/lib/billing/asaas';
 
 export const maxDuration = 30;
 
@@ -30,20 +31,64 @@ function mapMethod(billingType?: string): string {
   }
 }
 
-/** Descobre o plano pago a partir do tenant (billing_plan) ou, na falta, pelo valor cobrado. */
-function resolvePlan(tenant: any, plans: Record<PlanId, PlanDefinition>, value?: number): PaidPlanId | null {
-  if (isPaidPlan(tenant.billing_plan)) return tenant.billing_plan;
-  const byValue = (Object.values(plans) as PlanDefinition[]).find((p) => p.price > 0 && p.price === Number(value));
-  if (byValue && isPaidPlan(byValue.id)) return byValue.id;
-  return isPaidPlan(tenant.plan) ? tenant.plan : null;
+function parseExternalRef(raw?: string | null): { tenantId: string | null; planId: PaidPlanId | null } {
+  if (!raw) return { tenantId: null, planId: null };
+  const trimmed = String(raw).trim();
+  const m = /^erbots:([0-9a-f-]{36}):([a-z0-9_-]+)$/i.exec(trimmed);
+  if (m) {
+    const p = m[2].toLowerCase();
+    return { tenantId: m[1], planId: isPaidPlan(p) ? p : null };
+  }
+  if (/^[0-9a-f-]{36}$/i.test(trimmed)) {
+    return { tenantId: trimmed, planId: null };
+  }
+  return { tenantId: null, planId: null };
 }
 
 /**
- * Webhook do Asaas. Configure no painel do Asaas:
- *   URL:   https://SEU-DOMINIO/api/webhook/asaas
- *   Token de autenticação: o mesmo valor de ASAAS_WEBHOOK_TOKEN
- *   Eventos: PAYMENT_* e SUBSCRIPTION_*
+ * Determina o plano pago com proteção contra divergência de valor (ex.: boleto antigo Start pago após iniciar Business).
  */
+function resolveVerifiedPlan(args: {
+  tenant: any;
+  plans: Record<PlanId, PlanDefinition>;
+  subId?: string | null;
+  refPlan?: PaidPlanId | null;
+  paidValue?: number;
+}): PaidPlanId | null {
+  const { tenant, plans, subId, refPlan, paidValue } = args;
+  const amount = Number(paidValue) || 0;
+  const paidPlans = (Object.values(plans) as PlanDefinition[]).filter((p) => isPaidPlan(p.id) && p.price > 0);
+
+  let candidate: PaidPlanId | null = refPlan || null;
+  if (!candidate && subId && tenant.pending_subscription_id === subId && isPaidPlan(tenant.pending_plan)) {
+    candidate = tenant.pending_plan;
+  }
+  if (!candidate && subId && tenant.billing_subscription_id === subId && isPaidPlan(tenant.billing_plan)) {
+    candidate = tenant.billing_plan;
+  }
+
+  // Se sabemos o valor efetivamente pago, confere se é compatível com o plano candidato
+  if (candidate && amount > 0) {
+    const expected = plans[candidate]?.price || 0;
+    if (expected > 0 && amount < expected * 0.9) {
+      // Valor pago é menor que o plano candidato: mapeia pelo valor real cobrado
+      const exactMatch = paidPlans.find((p) => Math.abs(p.price - amount) < 0.05);
+      if (exactMatch && isPaidPlan(exactMatch.id)) return exactMatch.id;
+      return null;
+    }
+    return candidate;
+  }
+
+  if (amount > 0) {
+    const byValue = paidPlans.find((p) => Math.abs(p.price - amount) < 0.05);
+    if (byValue && isPaidPlan(byValue.id)) return byValue.id;
+  }
+
+  if (candidate) return candidate;
+  if (isPaidPlan(tenant.billing_plan)) return tenant.billing_plan;
+  return isPaidPlan(tenant.plan) ? tenant.plan : null;
+}
+
 export async function POST(req: NextRequest) {
   try {
     if (!process.env.ASAAS_WEBHOOK_TOKEN) {
@@ -62,22 +107,32 @@ export async function POST(req: NextRequest) {
 
     const supabase = getServiceSupabase();
 
-    // 1. Localiza o tenant (por assinatura, cliente ou externalReference)
+    // 1. Localiza o tenant (por assinatura ativa/pendente, externalReference ou cliente)
     const subId = payment?.subscription || subscription?.id || null;
     const customerId = payment?.customer || subscription?.customer || null;
-    const extRef = payment?.externalReference || subscription?.externalReference || null;
+    const extRefRaw = payment?.externalReference || subscription?.externalReference || null;
+    const { tenantId: refTenantId, planId: refPlan } = parseExternalRef(extRefRaw);
 
     let tenant: any = null;
     if (subId) {
-      const { data } = await supabase.from('xerb_tenants').select('*').eq('billing_subscription_id', subId).maybeSingle();
+      const { data } = await supabase
+        .from('xerb_tenants')
+        .select('*')
+        .or(`billing_subscription_id.eq.${subId},pending_subscription_id.eq.${subId}`)
+        .limit(1)
+        .maybeSingle();
+      tenant = data;
+    }
+    if (!tenant && refTenantId) {
+      const { data } = await supabase.from('xerb_tenants').select('*').eq('id', refTenantId).maybeSingle();
       tenant = data;
     }
     if (!tenant && customerId) {
-      const { data } = await supabase.from('xerb_tenants').select('*').eq('billing_customer_id', customerId).maybeSingle();
-      tenant = data;
-    }
-    if (!tenant && extRef && /^[0-9a-f-]{36}$/i.test(extRef)) {
-      const { data } = await supabase.from('xerb_tenants').select('*').eq('id', extRef).maybeSingle();
+      const { data } = await supabase
+        .from('xerb_tenants')
+        .select('*')
+        .eq('billing_customer_id', customerId)
+        .maybeSingle();
       tenant = data;
     }
 
@@ -102,20 +157,34 @@ export async function POST(req: NextRequest) {
 
     const nowIso = new Date().toISOString();
 
-    // 3. Pagamento confirmado/recebido → ativa e estende o período
+    // 3. Pagamento confirmado/recebido → ativa plano verificado e substitui assinatura antiga (se houve upgrade)
     if (event === 'PAYMENT_CONFIRMED' || event === 'PAYMENT_RECEIVED') {
       const plansCfg = await getPlansConfig();
-      const plan = resolvePlan(tenant, plansCfg, payment?.value);
+      const plan = resolveVerifiedPlan({
+        tenant,
+        plans: plansCfg,
+        subId,
+        refPlan,
+        paidValue: payment?.value,
+      });
+
       if (!plan) {
-        console.error('[Asaas Webhook] Não foi possível determinar o plano do pagamento', payment?.id);
-        return NextResponse.json({ received: true, error: 'plan_unresolved' });
+        console.error('[Asaas Webhook] Não foi possível validar plano/valor do pagamento', payment?.id);
+        return NextResponse.json({ received: true, error: 'plan_unresolved_or_amount_mismatch' });
       }
 
+      const isUpgradeSwap = Boolean(
+        subId && tenant.billing_subscription_id && tenant.billing_subscription_id !== subId
+      );
+      const oldSubToCancel = isUpgradeSwap ? tenant.billing_subscription_id : null;
+
+      // Na troca de plano começa ciclo novo de 31 dias a partir de agora; na renovação do mesmo plano soma ao vencimento
       const currentUntil = tenant.trial_ends_at ? new Date(tenant.trial_ends_at).getTime() : 0;
-      const base = tenant.subscription_status === 'active' && currentUntil > Date.now() ? currentUntil : Date.now();
+      const isSamePlanRenewal =
+        !isUpgradeSwap && tenant.plan === plan && tenant.subscription_status === 'active' && currentUntil > Date.now();
+      const base = isSamePlanRenewal ? currentUntil : Date.now();
       const expiresAt = new Date(base + BILLING_PERIOD_DAYS * DAY_MS).toISOString();
 
-      // Registra o pagamento (gateway_id único). Se já existir (CONFIRMED seguido de RECEIVED), não estende de novo.
       let alreadyProcessed = false;
       const { error: payErr } = await supabase.from('xerb_payments').insert({
         tenant_id: tenant.id,
@@ -140,24 +209,40 @@ export async function POST(req: NextRequest) {
       }
 
       if (!alreadyProcessed) {
-        const { error: updErr } = await supabase
-          .from('xerb_tenants')
-          .update({
-            plan,
-            subscription_status: 'active',
-            trial_ends_at: expiresAt,
-            updated_at: nowIso,
-          })
-          .eq('id', tenant.id);
+        const tenantUpdate: Record<string, any> = {
+          plan,
+          billing_plan: plan,
+          subscription_status: 'active',
+          trial_ends_at: expiresAt,
+          pending_subscription_id: null,
+          pending_plan: null,
+          pending_invoice_url: null,
+          updated_at: nowIso,
+        };
+        if (subId) {
+          tenantUpdate.billing_subscription_id = subId;
+        }
+
+        const { error: updErr } = await supabase.from('xerb_tenants').update(tenantUpdate).eq('id', tenant.id);
         if (updErr) throw updErr;
+
+        // Cancela a assinatura anterior SOMENTE depois que o novo plano já foi pago e gravado!
+        if (oldSubToCancel) {
+          await cancelSubscription(oldSubToCancel).catch((e) =>
+            console.warn('[Asaas Webhook] Falha ao cancelar assinatura anterior substituída:', e)
+          );
+        }
       }
 
-      return NextResponse.json({ received: true, activated: !alreadyProcessed });
+      return NextResponse.json({ received: true, activated: !alreadyProcessed, plan });
     }
 
-    // 4. Cobrança vencida → inadimplente (o robô tem alguns dias de tolerância antes de pausar)
+    // 4. Cobrança vencida → apenas afeta se for da assinatura principal vigente (não de um checkout abandonado)
     if (event === 'PAYMENT_OVERDUE') {
-      if (tenant.subscription_status === 'active') {
+      if (
+        tenant.subscription_status === 'active' &&
+        (!subId || !tenant.billing_subscription_id || subId === tenant.billing_subscription_id)
+      ) {
         await supabase
           .from('xerb_tenants')
           .update({ subscription_status: 'past_due', updated_at: nowIso })
@@ -178,12 +263,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ received: true });
     }
 
-    // 6. Assinatura removida/inativada → cancela renovação (acesso até o fim do período pago)
+    // 6. Assinatura removida/inativada → ignora se for assinatura antiga substituída em upgrade
     if (event === 'SUBSCRIPTION_DELETED' || event === 'SUBSCRIPTION_INACTIVATED') {
       if (subscription?.id && tenant.billing_subscription_id === subscription.id) {
         await supabase
           .from('xerb_tenants')
           .update({ subscription_status: 'canceled', billing_subscription_id: null, updated_at: nowIso })
+          .eq('id', tenant.id);
+      } else if (subscription?.id && tenant.pending_subscription_id === subscription.id) {
+        await supabase
+          .from('xerb_tenants')
+          .update({
+            pending_subscription_id: null,
+            pending_plan: null,
+            pending_invoice_url: null,
+            updated_at: nowIso,
+          })
           .eq('id', tenant.id);
       }
       return NextResponse.json({ received: true });
@@ -192,7 +287,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ received: true, ignored: event });
   } catch (err: any) {
     console.error('[Asaas Webhook] Erro:', err);
-    // 500 faz o Asaas reenviar o evento mais tarde
     return NextResponse.json({ error: 'Internal Error' }, { status: 500 });
   }
 }

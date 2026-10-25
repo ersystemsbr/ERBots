@@ -93,6 +93,16 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (createErr || !created) {
+      if ((createErr as any)?.code === '23505') {
+        const { data: raced } = await supabase
+          .from('xerb_tenants')
+          .select('*')
+          .eq('user_id', ctx.userId)
+          .limit(1);
+        if (raced && raced.length > 0) {
+          return NextResponse.json({ tenant: raced[0], isSuperAdmin: ctx.isSuperAdmin });
+        }
+      }
       console.error('[Tenant Bootstrap] Erro ao criar tenant:', createErr);
       return NextResponse.json({ error: 'Não foi possível preparar sua conta.' }, { status: 500 });
     }

@@ -28,15 +28,16 @@ interface UserProfileManagerProps {
 }
 
 const SEGMENT_OPTIONS = [
-  'Comércio / Varejo',
+  'Clínicas & Saúde',
+  'Imobiliárias & Corretores',
+  'Barbearias & Estética',
+  'Comércio & Lojas',
+  'Escritórios & Serviços',
+  'Pet Shop & Veterinária',
   'Restaurante / Bar / Delivery',
-  'Software / Tecnologia / SaaS',
-  'Saúde & Clínicas',
-  'Serviços & Consultoria',
-  'Imobiliária & Corretores',
   'Educação & Cursos',
   'Automotivo & Frotas',
-  'Beleza & Estética',
+  'Software / Tecnologia / SaaS',
   'Outro',
 ];
 
@@ -47,9 +48,10 @@ export default function UserProfileManager({
 }: UserProfileManagerProps) {
   // Dados da Empresa
   const [name, setName] = useState(tenant?.name || '');
-  const [segment, setSegment] = useState(tenant?.segment || 'Comércio / Varejo');
+  const [segment, setSegment] = useState(tenant?.segment || 'Clínicas & Saúde');
   const [customSegment, setCustomSegment] = useState('');
   const [phone, setPhone] = useState(tenant?.phone || '');
+  const [alertPhone, setAlertPhone] = useState(tenant?.alert_phone || '');
   const [email, setEmail] = useState(tenant?.email || '');
   const [slug, setSlug] = useState(tenant?.slug || '');
   const [cpfCnpj, setCpfCnpj] = useState(tenant?.cpf_cnpj || '');
@@ -76,6 +78,7 @@ export default function UserProfileManager({
         setCustomSegment(tenant.segment || '');
       }
       setPhone(tenant.phone || '');
+      setAlertPhone(tenant.alert_phone || '');
       setEmail(tenant.email || '');
       setSlug(tenant.slug || '');
       setCpfCnpj(tenant.cpf_cnpj || '');
@@ -107,8 +110,8 @@ export default function UserProfileManager({
           name: name.trim(),
           segment: finalSegment,
           phone: phone.trim(),
+          alert_phone: alertPhone.trim(),
           email: email.trim().toLowerCase(),
-          slug: slug.trim().toLowerCase(),
           cpf_cnpj: cpfCnpj.trim(),
         }),
       });
@@ -132,8 +135,8 @@ export default function UserProfileManager({
     e.preventDefault();
     setPasswordMsg(null);
 
-    if (!newPassword || newPassword.length < 6) {
-      setPasswordMsg({ type: 'error', text: 'A nova senha deve ter no mínimo 6 caracteres.' });
+    if (!newPassword || newPassword.length < 8) {
+      setPasswordMsg({ type: 'error', text: 'A nova senha deve ter no mínimo 8 caracteres.' });
       return;
     }
 
@@ -277,11 +280,11 @@ export default function UserProfileManager({
             </div>
           )}
 
-          {/* Telefone / WhatsApp de Contato */}
+          {/* Telefone / WhatsApp Comercial */}
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1.5 flex items-center gap-1.5">
               <Phone className="w-3.5 h-3.5 text-slate-400" />
-              Telefone / WhatsApp Comercial
+              WhatsApp Comercial (Atendimento)
             </label>
             <input
               type="text"
@@ -289,6 +292,21 @@ export default function UserProfileManager({
               onChange={(e) => setPhone(e.target.value)}
               className="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
               placeholder="Ex: (11) 99999-9999"
+            />
+          </div>
+
+          {/* WhatsApp Pessoal do Gestor para Alertas */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1.5 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+              WhatsApp Pessoal p/ Alertas (Transbordo e Queda)
+            </label>
+            <input
+              type="text"
+              value={alertPhone}
+              onChange={(e) => setAlertPhone(e.target.value)}
+              className="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
+              placeholder="Seu celular pessoal c/ DDD (Ex: 11988887777)"
             />
           </div>
 
@@ -308,7 +326,7 @@ export default function UserProfileManager({
           </div>
 
           {/* CPF / CNPJ (usado na cobrança) */}
-          <div className="md:col-span-2">
+          <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1.5">
               CPF ou CNPJ (para emissão da cobrança)
             </label>
@@ -322,22 +340,21 @@ export default function UserProfileManager({
             />
           </div>
 
-          {/* Slug / Identificador */}
+          {/* Slug / Identificador (somente leitura para estabilidade) */}
           <div className="md:col-span-2">
             <label className="block text-xs font-semibold text-slate-300 mb-1.5 flex items-center justify-between">
               <span>Identificador Único da Empresa (Slug)</span>
-              <span className="text-[10px] text-slate-500">Usado em links internos e integrações</span>
+              <span className="text-[10px] text-slate-500">Fixo após criação da conta</span>
             </label>
-            <div className="flex rounded-xl overflow-hidden border border-slate-700 bg-slate-800/80">
-              <span className="px-3.5 py-2.5 bg-slate-800 text-xs text-slate-400 border-r border-slate-700 flex items-center">
+            <div className="flex rounded-xl overflow-hidden border border-slate-800 bg-slate-900/80 opacity-80">
+              <span className="px-3.5 py-2.5 bg-slate-800/70 text-xs text-slate-500 border-r border-slate-800 flex items-center">
                 erbots.com.br/
               </span>
               <input
                 type="text"
                 value={slug}
-                onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''))}
-                className="flex-1 bg-transparent px-3 py-2.5 text-sm text-white focus:outline-none"
-                placeholder="minha-empresa"
+                readOnly
+                className="flex-1 bg-transparent px-3 py-2.5 text-sm text-slate-400 cursor-not-allowed focus:outline-none"
               />
             </div>
           </div>
@@ -454,7 +471,7 @@ export default function UserProfileManager({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-              Nova Senha (mínimo 6 caracteres)
+              Nova Senha (mínimo 8 caracteres)
             </label>
             <input
               type="password"

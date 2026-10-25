@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticate } from '@/lib/auth';
 import { logSystemEvent } from '@/lib/monitoring';
+import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 
 export async function POST(req: NextRequest) {
   try {
+    const ip = getClientIp(req);
+    const rl = checkRateLimit(`client-error:${ip}`, 15, 60_000);
+    if (!rl.allowed) {
+      return NextResponse.json({ ok: false, error: 'Too many reports' }, { status: 429 });
+    }
+
     const raw = await req.text();
     if (raw.length > 8192) {
       return NextResponse.json({ error: 'Payload too large' }, { status: 413 });
