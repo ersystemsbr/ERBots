@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
-import { sendTextMessage, getMediaBase64, normalizeBrPhone } from '@/lib/evolution';
+import {
+  sendTextMessage,
+  getMediaBase64,
+  normalizeBrPhone,
+  tryReconnectInstance,
+  findHealthyNotifierInstance,
+} from '@/lib/evolution';
 import { processAIMessage, transcribeMedia } from '@/lib/ai/gemini';
 import { verifyWebhookToken } from '@/lib/webhook';
 import { checkAiGate, recordUsage } from '@/lib/billing/usage';
+import { logSystemEvent } from '@/lib/monitoring';
 
 export const maxDuration = 60;
 
@@ -282,26 +289,158 @@ export async function POST(req: NextRequest) {
 
     const supabase = getServiceSupabase();
 
-    // 1. Trata evento de conexão (CONNECTION_UPDATE)
+    // 1. Trata evento de conexão (CONNECTION_UPDATE) com reconexão suave + alerta de queda
     if (rawEvent.includes('connection')) {
       const state = payload.data?.state || payload.state;
+      const statusReason = Number(payload.data?.statusReason || 0);
       const statusMap: Record<string, string> = {
         open: 'CONNECTED',
         connecting: 'CONNECTING',
         close: 'DISCONNECTED',
       };
       const mappedStatus = statusMap[state] || 'DISCONNECTED';
+      const nowIso = new Date().toISOString();
 
+      const { data: instRow } = await supabase
+        .from('xerb_instances')
+        .select('id, tenant_id, instance_name, status, last_connected_at, last_disconnect_alert_at, intentional_logout')
+        .eq('instance_name', instanceName)
+        .maybeSingle();
+
+      if (!instRow) {
+        return NextResponse.json({ skipped: true, reason: 'Instance not managed by ERBots' });
+      }
+
+      if (mappedStatus === 'CONNECTED') {
+        await supabase
+          .from('xerb_instances')
+          .update({
+            status: 'CONNECTED',
+            last_connected_at: nowIso,
+            disconnected_at: null,
+            intentional_logout: false,
+            updated_at: nowIso,
+          })
+          .eq('id', instRow.id);
+
+        if (instRow.status === 'DISCONNECTED' && instRow.last_connected_at) {
+          await logSystemEvent({
+            level: 'info',
+            source: 'whatsapp.reconnected',
+            message: `Instância ${instanceName} voltou a ficar online.`,
+            tenantId: instRow.tenant_id,
+            metadata: { instanceName },
+          });
+        }
+        return NextResponse.json({ success: true, event: 'connection.update', status: 'CONNECTED' });
+      }
+
+      if (mappedStatus === 'CONNECTING') {
+        await supabase
+          .from('xerb_instances')
+          .update({ status: 'CONNECTING', updated_at: nowIso })
+          .eq('id', instRow.id);
+        return NextResponse.json({ success: true, event: 'connection.update', status: 'CONNECTING' });
+      }
+
+      // Estado: DISCONNECTED (close)
+      // Se foi logout intencional pelo painel ou nunca esteve conectado (ex.: QR expirado), apenas registra
+      if (instRow.intentional_logout || !instRow.last_connected_at) {
+        await supabase
+          .from('xerb_instances')
+          .update({ status: 'DISCONNECTED', updated_at: nowIso })
+          .eq('id', instRow.id);
+        return NextResponse.json({ success: true, event: 'connection.update', status: 'DISCONNECTED' });
+      }
+
+      // Se não foi revogado no celular (statusReason !== 401), tenta reconexão suave antes de alarmar
+      if (statusReason !== 401) {
+        await sleep(2500);
+        const recovered = await tryReconnectInstance(instanceName);
+        if (recovered === 'open') {
+          await supabase
+            .from('xerb_instances')
+            .update({
+              status: 'CONNECTED',
+              last_connected_at: new Date().toISOString(),
+              disconnected_at: null,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', instRow.id);
+          return NextResponse.json({ success: true, event: 'connection.update', autoReconnected: true });
+        }
+      }
+
+      // Permaneceu desconectado: atualiza banco, grava alerta em xerb_system_logs e avisa o dono (cooldown 4h)
       await supabase
         .from('xerb_instances')
         .update({
-          status: mappedStatus,
-          last_connected_at: mappedStatus === 'CONNECTED' ? new Date().toISOString() : undefined,
-          updated_at: new Date().toISOString(),
+          status: 'DISCONNECTED',
+          disconnected_at: nowIso,
+          updated_at: nowIso,
         })
-        .eq('instance_name', instanceName);
+        .eq('id', instRow.id);
 
-      return NextResponse.json({ success: true, event: 'connection.update' });
+      const { data: tenantInfo } = await supabase
+        .from('xerb_tenants')
+        .select('id, name, email, phone')
+        .eq('id', instRow.tenant_id)
+        .maybeSingle();
+
+      await logSystemEvent({
+        level: 'warn',
+        source: 'whatsapp.disconnect',
+        message: `WhatsApp desconectado (${tenantInfo?.name || instanceName})`,
+        tenantId: instRow.tenant_id,
+        metadata: { instanceName, statusReason },
+      });
+
+      const DISCONNECT_ALERT_COOLDOWN_MS = 4 * HOUR_MS;
+      const lastAlertMs = instRow.last_disconnect_alert_at ? new Date(instRow.last_disconnect_alert_at).getTime() : 0;
+
+      if (!lastAlertMs || Date.now() - lastAlertMs > DISCONNECT_ALERT_COOLDOWN_MS) {
+        await supabase
+          .from('xerb_instances')
+          .update({ last_disconnect_alert_at: nowIso })
+          .eq('id', instRow.id);
+
+        const ownerPhone = normalizeBrPhone(tenantInfo?.phone);
+        const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://www.erbots.com.br').replace(/\/+$/, '');
+        const notifier = await findHealthyNotifierInstance(instanceName);
+
+        if (ownerPhone && notifier) {
+          const alertMsg = [
+            '⚠️ *ERBots – Alerta de Desconexão*',
+            '',
+            `O WhatsApp comercial da empresa *${tenantInfo?.name || 'sua conta'}* desconectou e o atendimento automático foi pausado.`,
+            '',
+            `Acesse o painel para ler o QR Code e reconectar em segundos: ${appUrl}/dashboard`,
+          ].join('\n');
+          await sendTextMessage(notifier, ownerPhone, alertMsg).catch(() => false);
+        }
+
+        // E-mail opcional via Resend caso RESEND_API_KEY esteja configurada
+        const resendKey = process.env.RESEND_API_KEY;
+        const fromEmail = process.env.ALERT_FROM_EMAIL || 'ERBots <alertas@erbots.com.br>';
+        if (resendKey && tenantInfo?.email) {
+          await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${resendKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              from: fromEmail,
+              to: [tenantInfo.email],
+              subject: `⚠️ WhatsApp desconectado — ${tenantInfo.name || 'ERBots'}`,
+              html: `<p>Olá, <strong>${tenantInfo.name || ''}</strong>!</p><p>Detectamos que o WhatsApp conectado ao seu ERBots perdeu a sessão e o robô pausou as respostas.</p><p><a href="${appUrl}/dashboard">Clique aqui para abrir o painel e reconectar</a>.</p>`,
+            }),
+            signal: AbortSignal.timeout(5000),
+          }).catch(() => {});
+        }
+      }
+
+      return NextResponse.json({ success: true, event: 'connection.update', status: 'DISCONNECTED', alerted: true });
     }
 
     // 2. Filtra apenas eventos de mensagem (MESSAGES_UPSERT)
@@ -618,7 +757,13 @@ export async function POST(req: NextRequest) {
     const sent = await sendTextMessage(instanceName, remoteJid, aiResult.reply);
     if (!sent) {
       if (aiMsgId && aiMsgId !== 'DUPLICATE') await supabase.from('xerb_messages').delete().eq('id', aiMsgId);
-      console.error(`[Webhook] Não foi possível enviar a resposta para ${cleanPhone} (instância ${instanceName}).`);
+      await logSystemEvent({
+        level: 'error',
+        source: 'webhook.whatsapp.send',
+        message: `Falha ao enviar resposta da IA na instância ${instanceName}`,
+        tenantId,
+        metadata: { instanceName, cleanPhone },
+      });
       return NextResponse.json({ success: true, replied: false, reason: 'send_failed' });
     }
 
@@ -650,7 +795,12 @@ export async function POST(req: NextRequest) {
       handoff: Boolean(aiResult.triggerHandoff),
     });
   } catch (err: any) {
-    console.error('[Webhook] Erro fatal:', err);
+    await logSystemEvent({
+      level: 'error',
+      source: 'webhook.whatsapp',
+      message: 'Erro fatal no processamento do webhook do WhatsApp',
+      error: err,
+    });
     return NextResponse.json({ error: 'Internal Error' }, { status: 500 });
   }
 }

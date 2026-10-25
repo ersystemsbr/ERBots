@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperAdmin } from '@/lib/auth';
 import { getGeminiApiKey } from '@/lib/ai/gemini';
-import { getEvolutionConfig } from '@/lib/evolution';
+import { getEvolutionConfig, checkEvolutionHealth } from '@/lib/evolution';
 import { isWebhookSecretConfigured } from '@/lib/webhook';
 import { isAsaasConfigured } from '@/lib/billing/asaas';
 
@@ -20,7 +20,7 @@ function jwtRole(key?: string): string | null {
 }
 
 /**
- * Diagnóstico de configuração de produção (sem expor valores de segredos).
+ * Diagnóstico de configuração e saúde de produção (sem expor valores de segredos).
  */
 export async function GET(req: NextRequest) {
   try {
@@ -28,8 +28,13 @@ export async function GET(req: NextRequest) {
     if (!guard.ok) return guard.response;
 
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const evo = await getEvolutionConfig();
-    const gemini = await getGeminiApiKey();
+    const [evo, evoHealth, gemini] = await Promise.all([
+      getEvolutionConfig(),
+      checkEvolutionHealth(),
+      getGeminiApiKey(),
+    ]);
+
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/+$/, '');
 
     return NextResponse.json({
       serviceRoleKey: {
@@ -39,12 +44,20 @@ export async function GET(req: NextRequest) {
       },
       webhookSecretConfigured: isWebhookSecretConfigured(),
       evolutionConfigured: Boolean(evo.apiUrl && evo.apiKey),
-      evolutionUrlIsTemporaryTunnel: /trycloudflare\.com/i.test(evo.apiUrl || ''),
+      evolutionUrlIsTemporaryTunnel: evoHealth.isTemporaryTunnel,
+      evolutionReachable: evoHealth.reachable,
+      evolutionLatencyMs: evoHealth.latencyMs,
+      evolutionPublicUrl: evoHealth.publicUrl,
+      evolutionErbotsOpen: evoHealth.erbotsOpenInstances,
+      evolutionErbotsTotal: evoHealth.erbotsTotalInstances,
+      webhookPublicUrl: appUrl ? `${appUrl}/api/webhook/whatsapp` : '',
       geminiConfigured: Boolean(gemini),
-      appUrlConfigured: Boolean(process.env.NEXT_PUBLIC_APP_URL),
+      appUrlConfigured: Boolean(appUrl),
       asaasConfigured: isAsaasConfigured(),
       asaasWebhookTokenConfigured: Boolean(process.env.ASAAS_WEBHOOK_TOKEN),
       asaasSandbox: process.env.ASAAS_ENV === 'sandbox',
+      sentryConfigured: Boolean(process.env.SENTRY_DSN),
+      alertWebhookConfigured: Boolean(process.env.ALERT_WEBHOOK_URL),
     });
   } catch (err: any) {
     if (err?.digest?.startsWith('NEXT_')) throw err;

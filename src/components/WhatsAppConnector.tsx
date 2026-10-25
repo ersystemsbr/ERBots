@@ -1,6 +1,7 @@
 'use client';
 
 import { authFetch } from '@/lib/api-client';
+import { supabase } from '@/lib/supabase';
 
 import React, { useState, useEffect } from 'react';
 import { QrCode, Smartphone, CheckCircle2, AlertCircle, RefreshCw, LogOut, Send, Zap } from 'lucide-react';
@@ -108,12 +109,44 @@ export default function WhatsAppConnector({ tenantId, tenantSlug, onStatusChange
     fetchStatus('STATUS');
   }, [tenantId]);
 
-  // Polling automático para detectar leitura do QR Code
+  // Escuta mudanças em tempo real na tabela xerb_instances (ex.: leitura do QR Code ou desconexão)
+  useEffect(() => {
+    if (!tenantId) return;
+    const channel = supabase
+      .channel(`wa-connector-${tenantId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'xerb_instances',
+          filter: `tenant_id=eq.${tenantId}`,
+        },
+        (payload) => {
+          const row: any = payload.new;
+          if (!row) return;
+          if (row.status === 'CONNECTED') {
+            fetchStatus('STATUS');
+          } else if (row.status === 'DISCONNECTED') {
+            setStatus('DISCONNECTED');
+            setQrcode(null);
+            if (onStatusChange) onStatusChange(false);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [tenantId]);
+
+  // Polling de contingência para detectar leitura do QR Code caso WebSocket oscile
   useEffect(() => {
     if (status === 'QRCODE') {
       const timer = setInterval(() => {
         fetchStatus('STATUS');
-      }, 5000);
+      }, 6000);
       return () => clearInterval(timer);
     }
   }, [status, tenantId]);

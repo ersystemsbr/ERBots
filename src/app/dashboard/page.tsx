@@ -12,7 +12,13 @@ import UserProfileManager from '@/components/UserProfileManager';
 import { supabase } from '@/lib/supabase';
 import { authFetch } from '@/lib/api-client';
 import { getAccessState } from '@/lib/plans';
-import { Loader2 } from 'lucide-react';
+import { Loader2, WifiOff } from 'lucide-react';
+
+interface InstanceSnapshot {
+  status: string;
+  last_connected_at?: string | null;
+  intentional_logout?: boolean;
+}
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -20,7 +26,24 @@ export default function DashboardPage() {
   const [tenant, setTenant] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [unexpectedDisconnect, setUnexpectedDisconnect] = useState<boolean>(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(false);
+
+  const applyInstanceSnapshot = (inst?: InstanceSnapshot | null) => {
+    if (!inst) {
+      setIsConnected(false);
+      setUnexpectedDisconnect(false);
+      return;
+    }
+    const connected = inst.status === 'CONNECTED';
+    setIsConnected(connected);
+    setUnexpectedDisconnect(
+      !connected &&
+        inst.status === 'DISCONNECTED' &&
+        Boolean(inst.last_connected_at) &&
+        !inst.intentional_logout
+    );
+  };
 
   useEffect(() => {
     async function initTenant() {
@@ -59,10 +82,51 @@ export default function DashboardPage() {
     initTenant();
   }, [router]);
 
+  // Monitora em tempo real o estado da instância WhatsApp do tenant (para badge na barra e alerta de queda)
+  useEffect(() => {
+    const tid = tenant?.id;
+    if (!tid) return;
+
+    let active = true;
+    (async () => {
+      try {
+        const res = await authFetch(`/api/whatsapp/instance?tenant_id=${encodeURIComponent(tid)}`);
+        if (res.ok && active) {
+          const d = await res.json();
+          applyInstanceSnapshot(d.instance);
+        }
+      } catch {
+        // Silencioso
+      }
+    })();
+
+    const channel = supabase
+      .channel(`dashboard-instance-${tid}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'xerb_instances',
+          filter: `tenant_id=eq.${tid}`,
+        },
+        (payload) => {
+          const next = (payload.new || null) as InstanceSnapshot | null;
+          if (next) applyInstanceSnapshot(next);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      active = false;
+      supabase.removeChannel(channel);
+    };
+  }, [tenant?.id]);
+
   const handleLogout = async () => {
     try {
       await supabase.auth.signOut();
-    } catch (e) {}
+    } catch {}
     if (typeof window !== 'undefined') {
       localStorage.removeItem('erbots_active_tenant_id');
     }
@@ -82,7 +146,11 @@ export default function DashboardPage() {
   const tenantSlug = tenant?.slug || 'empresa';
   const access = getAccessState(tenant || {});
   const showBanner =
-    !!tenant && !isSuperAdmin && (!access.allowed || tenant.subscription_status === 'past_due' || (tenant.subscription_status === 'trialing' && access.daysLeft <= 2));
+    !!tenant &&
+    !isSuperAdmin &&
+    (!access.allowed ||
+      tenant.subscription_status === 'past_due' ||
+      (tenant.subscription_status === 'trialing' && access.daysLeft <= 2));
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
@@ -96,6 +164,23 @@ export default function DashboardPage() {
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {unexpectedDisconnect && currentTab !== 'whatsapp' && (
+          <div className="mb-6 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm text-rose-200">
+            <div className="flex items-center gap-2.5">
+              <WifiOff className="w-5 h-5 text-rose-400 shrink-0" />
+              <span>
+                <strong>Seu WhatsApp desconectou!</strong> O atendimento automático está pausado até reconectar o aparelho.
+              </span>
+            </div>
+            <button
+              onClick={() => setCurrentTab('whatsapp')}
+              className="shrink-0 px-4 py-1.5 bg-rose-500 hover:bg-rose-400 text-slate-950 font-bold text-xs rounded-lg transition"
+            >
+              Reconectar WhatsApp
+            </button>
+          </div>
+        )}
+
         {showBanner && currentTab !== 'plans' && (
           <div
             className={`mb-6 rounded-xl border px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm ${
@@ -118,7 +203,10 @@ export default function DashboardPage() {
           <WhatsAppConnector
             tenantId={tenantId}
             tenantSlug={tenantSlug}
-            onStatusChange={setIsConnected}
+            onStatusChange={(connected) => {
+              setIsConnected(connected);
+              if (connected) setUnexpectedDisconnect(false);
+            }}
           />
         )}
 

@@ -300,3 +300,189 @@ export function normalizeBrPhone(raw?: string | null): string | null {
   if ((d.length === 12 || d.length === 13) && d.startsWith('55')) return d;
   return null;
 }
+
+export interface EvolutionHealthReport {
+  reachable: boolean;
+  latencyMs: number | null;
+  publicUrl: string;
+  isTemporaryTunnel: boolean;
+  totalInstances: number;
+  openInstances: number;
+  erbotsOpenInstances: number;
+  erbotsTotalInstances: number;
+}
+
+/**
+ * Testa conectividade e latência em tempo real com a Evolution API.
+ */
+export async function checkEvolutionHealth(): Promise<EvolutionHealthReport> {
+  const { apiUrl, apiKey } = await getEvolutionConfig();
+  const isTemporaryTunnel = /trycloudflare\.com/i.test(apiUrl || '');
+
+  if (!apiUrl || !apiKey) {
+    return {
+      reachable: false,
+      latencyMs: null,
+      publicUrl: apiUrl || '',
+      isTemporaryTunnel,
+      totalInstances: 0,
+      openInstances: 0,
+      erbotsOpenInstances: 0,
+      erbotsTotalInstances: 0,
+    };
+  }
+
+  const start = Date.now();
+  try {
+    const res = await fetch(`${apiUrl}/instance/fetchInstances`, {
+      headers: { apikey: apiKey },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(6000),
+    });
+    const latencyMs = Date.now() - start;
+    if (!res.ok) {
+      return {
+        reachable: false,
+        latencyMs,
+        publicUrl: apiUrl,
+        isTemporaryTunnel,
+        totalInstances: 0,
+        openInstances: 0,
+        erbotsOpenInstances: 0,
+        erbotsTotalInstances: 0,
+      };
+    }
+
+    const list = await res.json();
+    const arr = Array.isArray(list) ? list : [];
+    let openInstances = 0;
+    let erbotsOpenInstances = 0;
+    let erbotsTotalInstances = 0;
+
+    for (const item of arr) {
+      const name: string = item?.name || item?.instance?.instanceName || '';
+      const state: string = item?.connectionStatus || item?.instance?.state || 'close';
+      const isOpen = state === 'open';
+      if (isOpen) openInstances++;
+      if (name.startsWith('erbots_')) {
+        erbotsTotalInstances++;
+        if (isOpen) erbotsOpenInstances++;
+      }
+    }
+
+    return {
+      reachable: true,
+      latencyMs,
+      publicUrl: apiUrl,
+      isTemporaryTunnel,
+      totalInstances: arr.length,
+      openInstances,
+      erbotsOpenInstances,
+      erbotsTotalInstances,
+    };
+  } catch {
+    return {
+      reachable: false,
+      latencyMs: Date.now() - start,
+      publicUrl: apiUrl,
+      isTemporaryTunnel,
+      totalInstances: 0,
+      openInstances: 0,
+      erbotsOpenInstances: 0,
+      erbotsTotalInstances: 0,
+    };
+  }
+}
+
+/**
+ * Tenta verificar o estado real e acionar reconexão suave quando uma instância sofre queda transitória.
+ */
+export async function tryReconnectInstance(instanceName: string): Promise<'open' | 'connecting' | 'close'> {
+  const { apiUrl, apiKey } = await getEvolutionConfig();
+  if (!apiUrl || !apiKey) return 'close';
+
+  const getState = async (): Promise<'open' | 'connecting' | 'close'> => {
+    try {
+      const res = await fetch(`${apiUrl}/instance/connectionState/${instanceName}`, {
+        headers: { apikey: apiKey },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!res.ok) return 'close';
+      const data = await res.json();
+      const s = data?.instance?.state || data?.state || 'close';
+      if (s === 'open' || s === 'connecting') return s;
+      return 'close';
+    } catch {
+      return 'close';
+    }
+  };
+
+  const current = await getState();
+  if (current === 'open') return 'open';
+
+  try {
+    await fetch(`${apiUrl}/instance/connect/${instanceName}`, {
+      headers: { apikey: apiKey },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(5000),
+    });
+  } catch {
+    // Segue para nova checagem
+  }
+
+  await new Promise((r) => setTimeout(r, 3500));
+  return await getState();
+}
+
+/**
+ * Localiza uma instância erbots_* ativa (preferindo a de Super Admin ou configurada em alert_instance_name)
+ * para despachar alertas de queda quando a instância do próprio cliente acabou de desconectar.
+ */
+export async function findHealthyNotifierInstance(excludeInstance?: string): Promise<string | null> {
+  const { apiUrl, apiKey } = await getEvolutionConfig();
+  if (!apiUrl || !apiKey) return null;
+
+  try {
+    const supabase = getServiceSupabase();
+    const { data: cfg } = await supabase
+      .from('xerb_system_config')
+      .select('value')
+      .eq('key', 'alert_instance_name')
+      .maybeSingle();
+    const preferred = cfg?.value?.trim();
+
+    const res = await fetch(`${apiUrl}/instance/fetchInstances`, {
+      headers: { apikey: apiKey },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return null;
+    const arr = await res.json();
+    if (!Array.isArray(arr)) return null;
+
+    const openErbots = arr
+      .map((i: any) => ({
+        name: String(i?.name || i?.instance?.instanceName || ''),
+        state: String(i?.connectionStatus || i?.instance?.state || ''),
+      }))
+      .filter((i) => i.name.startsWith('erbots_') && i.state === 'open' && i.name !== excludeInstance);
+
+    if (!openErbots.length) return null;
+    if (preferred && openErbots.some((i) => i.name === preferred)) return preferred;
+
+    // Prioriza instância vinculada a um tenant Super Admin
+    const { data: adminInstances } = await supabase
+      .from('xerb_instances')
+      .select('instance_name, xerb_tenants!inner(is_super_admin)')
+      .eq('xerb_tenants.is_super_admin', true);
+
+    const adminNames = new Set((adminInstances || []).map((r: any) => r.instance_name));
+    const adminOpen = openErbots.find((i) => adminNames.has(i.name));
+    if (adminOpen) return adminOpen.name;
+
+    return openErbots[0].name;
+  } catch {
+    return null;
+  }
+}

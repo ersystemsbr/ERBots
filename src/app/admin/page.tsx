@@ -32,6 +32,7 @@ import { isDefaultAdmin } from '@/lib/admin';
 import AdminTenantsTable from '@/components/admin/AdminTenantsTable';
 import AdminPaymentsManager from '@/components/admin/AdminPaymentsManager';
 import AdminPlansEditor from '@/components/admin/AdminPlansEditor';
+import AdminSystemLogs from '@/components/admin/AdminSystemLogs';
 
 interface Metrics {
   mrr: number;
@@ -489,9 +490,17 @@ CREATE TABLE IF NOT EXISTS public.xerb_payments (
                       fix: 'Defina WEBHOOK_SECRET na Vercel (string aleatória longa), faça redeploy e clique em "Ressincronizar webhooks".',
                     },
                     {
-                      ok: health.evolutionConfigured && !health.evolutionUrlIsTemporaryTunnel,
-                      label: 'Evolution API com URL estável (não é túnel temporário trycloudflare)',
-                      fix: 'A URL atual é um túnel temporário ou não está configurada. Migre para domínio fixo.',
+                      ok: health.evolutionConfigured && health.evolutionReachable && !health.evolutionUrlIsTemporaryTunnel,
+                      label: `Evolution API online e em URL fixa${
+                        health.evolutionReachable && health.evolutionLatencyMs != null
+                          ? ` (${health.evolutionLatencyMs}ms • ${health.evolutionErbotsOpen ?? 0}/${health.evolutionErbotsTotal ?? 0} instâncias ERBots online)`
+                          : health.evolutionConfigured && !health.evolutionReachable
+                          ? ' — SERVIDOR INACESSÍVEL'
+                          : ''
+                      }`,
+                      fix: !health.evolutionReachable
+                        ? 'A Evolution API não respondeu. Verifique o servidor Linux e o túnel.'
+                        : 'A URL atual ainda usa túnel temporário trycloudflare.com. Ative o túnel fixo para evitar quedas em reinícios.',
                     },
                     {
                       ok: health.geminiConfigured,
@@ -560,19 +569,34 @@ CREATE TABLE IF NOT EXISTS public.xerb_payments (
                   <div>
                     <label className="text-xs text-slate-400 block mb-1">Webhook URL Ativo:</label>
                     <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-emerald-400 break-all select-all">
-                      https://erbots.vercel.app/api/webhook/whatsapp
+                      {health?.webhookPublicUrl || 'https://www.erbots.com.br/api/webhook/whatsapp'}
                     </div>
                   </div>
 
                   <div>
-                    <label className="text-xs text-slate-400 block mb-1">Servidor Evolution API:</label>
+                    <label className="text-xs text-slate-400 block mb-1 flex items-center justify-between">
+                      <span>Servidor Evolution API:</span>
+                      {health && (
+                        <span
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                            health.evolutionReachable
+                              ? 'bg-emerald-500/15 text-emerald-400'
+                              : 'bg-rose-500/15 text-rose-400'
+                          }`}
+                        >
+                          {health.evolutionReachable
+                            ? `Online • ${health.evolutionLatencyMs ?? 0}ms`
+                            : 'Offline'}
+                        </span>
+                      )}
+                    </label>
                     <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-slate-300 break-all select-all">
-                      https://evolution.erbots.com.br
+                      {health?.evolutionPublicUrl || 'Carregando...'}
                     </div>
                   </div>
 
                   <p className="text-xs text-slate-400">
-                    Todas as instâncias criadas apontam automaticamente para o webhook de produção da Vercel.
+                    Todas as instâncias criadas apontam automaticamente para o webhook autenticado de produção da Vercel.
                   </p>
                 </div>
               </div>
@@ -617,6 +641,9 @@ CREATE TABLE IF NOT EXISTS public.xerb_payments (
                 </div>
               </div>
             </div>
+
+            {/* Monitoramento de Eventos & Erros */}
+            <AdminSystemLogs />
 
             {/* Script SQL Supabase */}
             <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">
