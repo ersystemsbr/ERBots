@@ -275,6 +275,7 @@ async function notifyOwner(args: {
   lastMessage: string;
   handoff: boolean;
   lead?: CapturedLead;
+  conversationId?: string;
 }) {
   try {
     const owner = normalizeBrPhone(args.tenant.alert_phone) || normalizeBrPhone(args.tenant.phone);
@@ -286,6 +287,9 @@ async function notifyOwner(args: {
     const phoneDisplay = isLid ? args.customerPhone : `+${phoneDigits || args.customerPhone}`;
     const waLink = !isLid && phoneDigits.length >= 10 ? `https://wa.me/${phoneDigits}` : '';
     const displayName = args.lead?.customerName || args.customerName || args.customerPhone;
+    const chatLink = args.conversationId
+      ? `${appUrl}/dashboard?tab=chat&chat=${encodeURIComponent(args.conversationId)}`
+      : `${appUrl}/dashboard?tab=chat`;
 
     if (args.lead) {
       const header = args.handoff
@@ -300,14 +304,14 @@ async function notifyOwner(args: {
       ];
       if (args.lead.preferredSlot) lines.push(`📅 Preferência: *${args.lead.preferredSlot}*`);
       if (args.lead.notes) lines.push(`📝 Obs: ${args.lead.notes}`);
-      if (waLink) lines.push('', `📲 Chamar com 1 clique: ${waLink}`);
+      if (waLink) lines.push('', `📲 Chamar cliente no WhatsApp: ${waLink}`);
+      lines.push(`💬 Abrir no LiveChat do Painel: ${chatLink}`);
       if (args.handoff) {
         lines.push(
           '',
           `⏸️ A IA pausou nesta conversa para sua confirmação (retoma sozinha após ${HUMAN_TIMEOUT_HOURS}h sem resposta).`
         );
       }
-      lines.push(`📊 Painel: ${appUrl}/dashboard`);
 
       await sendTextMessage(args.instanceName, owner, lines.join('\n'));
       return;
@@ -316,15 +320,16 @@ async function notifyOwner(args: {
     if (args.handoff) {
       const preview = args.lastMessage.length > 220 ? `${args.lastMessage.slice(0, 220)}…` : args.lastMessage;
       const lines = [
-        '🔔 *ERBots – atendimento humano solicitado*',
+        '🔔 *ERBots – Atendimento Humano Solicitado*',
         '',
-        `Cliente: *${displayName}* (${phoneDisplay})`,
-        `Última mensagem: "${preview}"`,
+        `👤 Cliente: *${displayName}* (${phoneDisplay})`,
+        `💬 Mensagem: "${preview}"`,
       ];
-      if (waLink) lines.push(`📲 Chamar com 1 clique: ${waLink}`);
+      if (waLink) lines.push('', `📲 Chamar cliente no WhatsApp: ${waLink}`);
+      lines.push(`💬 Assumir no LiveChat do Painel: ${chatLink}`);
       lines.push(
         '',
-        `A IA está pausada nesta conversa. Responda direto pelo WhatsApp ou pelo painel: ${appUrl}/dashboard`,
+        `⏸️ A IA está pausada nesta conversa. Responda direto pelo WhatsApp ou pelo LiveChat.`,
         `(Se ninguém responder em ${HUMAN_TIMEOUT_HOURS}h, a IA volta a atender sozinha.)`
       );
       await sendTextMessage(args.instanceName, owner, lines.join('\n'));
@@ -1051,6 +1056,7 @@ export async function POST(req: NextRequest) {
         lastMessage: incomingBlock,
         handoff: Boolean(aiResult.triggerHandoff),
         lead: shouldNotifyLead ? aiResult.capturedLead : undefined,
+        conversationId: conversation.id,
       });
     }
 

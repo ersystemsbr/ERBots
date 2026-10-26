@@ -106,6 +106,7 @@ export async function requireTenantAccess(
         plan?: string | null;
         is_super_admin?: boolean | null;
         segment?: string | null;
+        alert_phone?: string | null;
       };
     }
   | { ok: false; response: NextResponse }
@@ -120,7 +121,7 @@ export async function requireTenantAccess(
   const supabase = getServiceSupabase();
   const { data: tenant } = await supabase
     .from('xerb_tenants')
-    .select('id, name, slug, phone, user_id, plan, is_super_admin, segment')
+    .select('id, name, slug, phone, user_id, plan, is_super_admin, segment, alert_phone')
     .eq('id', tenantId)
     .maybeSingle();
 

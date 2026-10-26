@@ -218,6 +218,25 @@ export async function logoutInstance(instanceName: string): Promise<boolean> {
 }
 
 /**
+ * Deleta completamente uma instância da Evolution API (libera memória e recursos no servidor Linux).
+ */
+export async function deleteEvolutionInstance(instanceName: string): Promise<boolean> {
+  const { apiUrl, apiKey } = await getEvolutionConfig();
+  if (!apiUrl || !apiKey || !instanceName) return false;
+  try {
+    const res = await fetch(`${apiUrl}/instance/delete/${encodeURIComponent(instanceName)}`, {
+      method: 'DELETE',
+      headers: { apikey: apiKey },
+      signal: AbortSignal.timeout(8000),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error(`[Evolution] Erro ao deletar instância ${instanceName}:`, err);
+    return false;
+  }
+}
+
+/**
  * Extrai identificadores normalizados de um evento da Evolution API v2.3+,
  * tratando leads de anúncios Meta/Instagram (@lid) e dispositivos múltiplos (:0).
  */

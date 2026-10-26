@@ -18,7 +18,10 @@ export async function GET(req: NextRequest) {
       .maybeSingle();
 
     if (error) throw error;
-    return NextResponse.json({ settings: data || null });
+    return NextResponse.json({
+      settings: data || null,
+      alert_phone: guard.tenant.alert_phone || '',
+    });
   } catch (err) {
     console.error('[BotSettings GET] Erro:', err);
     return NextResponse.json({ error: 'Erro ao carregar configurações da IA.' }, { status: 500 });
@@ -78,6 +81,23 @@ export async function PUT(req: NextRequest) {
       Number.isFinite(rawDelay) && rawDelay >= 30 && rawDelay <= 1440 ? Math.round(rawDelay) : 180;
 
     const supabase = getServiceSupabase();
+
+    let savedAlertPhone = guard.tenant.alert_phone || '';
+    if (body.alert_phone !== undefined) {
+      const cleanAlertPhone =
+        typeof body.alert_phone === 'string'
+          ? body.alert_phone.replace(/\D/g, '').slice(0, 20)
+          : null;
+      savedAlertPhone = cleanAlertPhone || '';
+      await supabase
+        .from('xerb_tenants')
+        .update({
+          alert_phone: cleanAlertPhone || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', guard.tenant.id);
+    }
+
     const { data, error } = await supabase
       .from('xerb_bot_settings')
       .upsert(
@@ -101,7 +121,7 @@ export async function PUT(req: NextRequest) {
       .single();
 
     if (error) throw error;
-    return NextResponse.json({ success: true, settings: data });
+    return NextResponse.json({ success: true, settings: data, alert_phone: savedAlertPhone });
   } catch (err) {
     console.error('[BotSettings PUT] Erro:', err);
     return NextResponse.json({ error: 'Erro ao salvar configurações da IA.' }, { status: 500 });

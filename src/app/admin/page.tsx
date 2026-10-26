@@ -33,6 +33,7 @@ import AdminTenantsTable from '@/components/admin/AdminTenantsTable';
 import AdminPaymentsManager from '@/components/admin/AdminPaymentsManager';
 import AdminPlansEditor from '@/components/admin/AdminPlansEditor';
 import AdminSystemLogs from '@/components/admin/AdminSystemLogs';
+import AdminServerMonitor from '@/components/admin/AdminServerMonitor';
 
 interface Metrics {
   mrr: number;
@@ -56,7 +57,6 @@ export default function AdminDashboardPage() {
   const [tenants, setTenants] = useState<any[]>([]);
   const [loadingMetrics, setLoadingMetrics] = useState(false);
   const [tenantForPayment, setTenantForPayment] = useState<any | null>(null);
-  const [copiedSql, setCopiedSql] = useState(false);
   const [health, setHealth] = useState<any>(null);
   const [resyncing, setResyncing] = useState(false);
   const [resyncMsg, setResyncMsg] = useState<string | null>(null);
@@ -185,32 +185,6 @@ export default function AdminDashboardPage() {
       await supabase.auth.signOut();
     } catch (e) {}
     router.push('/login');
-  };
-
-  const copySqlToClipboard = () => {
-    const sqlText = `-- Script de Criação do Módulo Super Admin & Pagamentos
-ALTER TABLE public.xerb_tenants ADD COLUMN IF NOT EXISTS is_super_admin BOOLEAN DEFAULT false;
-UPDATE public.xerb_tenants SET is_super_admin = true WHERE email IN ('er.systems.br@gmail.com', 'seozefood@gmail.com');
-
-INSERT INTO public.xerb_system_config (key, value, description)
-VALUES ('super_admin_emails', 'er.systems.br@gmail.com,seozefood@gmail.com', 'Super Admins')
-ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
-
-CREATE TABLE IF NOT EXISTS public.xerb_payments (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL REFERENCES public.xerb_tenants(id) ON DELETE CASCADE,
-    amount NUMERIC(10, 2) NOT NULL,
-    plan TEXT NOT NULL CHECK (plan IN ('trial', 'start', 'pro', 'business', 'custom')),
-    payment_method TEXT DEFAULT 'pix' CHECK (payment_method IN ('pix', 'credit_card', 'boleto', 'manual', 'transfer')),
-    status TEXT DEFAULT 'confirmed' CHECK (status IN ('pending', 'confirmed', 'failed', 'refunded')),
-    paid_at TIMESTAMPTZ DEFAULT now(),
-    expires_at TIMESTAMPTZ,
-    notes TEXT,
-    created_at TIMESTAMPTZ DEFAULT now()
-);`;
-    navigator.clipboard.writeText(sqlText);
-    setCopiedSql(true);
-    setTimeout(() => setCopiedSql(false), 2000);
   };
 
   if (loading) {
@@ -661,66 +635,8 @@ CREATE TABLE IF NOT EXISTS public.xerb_payments (
             {/* Monitoramento de Eventos & Erros */}
             <AdminSystemLogs />
 
-            {/* Script SQL Supabase */}
-            <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
-                    <Database className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-white">Instalação SQL no Supabase</h3>
-                    <p className="text-xs text-slate-400">
-                      Script para criar tabela de pagamentos (`xerb_payments`) e permissões de Super Admin
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  onClick={copySqlToClipboard}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 transition"
-                >
-                  {copiedSql ? (
-                    <>
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      <span className="text-emerald-400">Copiado!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5 text-slate-400" />
-                      <span>Copiar SQL</span>
-                    </>
-                  )}
-                </button>
-              </div>
-
-              <div className="relative">
-                <pre className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-slate-300 overflow-x-auto max-h-48 leading-relaxed">
-{`-- 1. Coluna is_super_admin na tabela xerb_tenants
-ALTER TABLE public.xerb_tenants ADD COLUMN IF NOT EXISTS is_super_admin BOOLEAN DEFAULT false;
-UPDATE public.xerb_tenants SET is_super_admin = true WHERE email IN ('er.systems.br@gmail.com', 'seozefood@gmail.com');
-
--- 2. Lista de Super Admins
-INSERT INTO public.xerb_system_config (key, value, description)
-VALUES ('super_admin_emails', 'er.systems.br@gmail.com,seozefood@gmail.com', 'Super Admins')
-ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
-
--- 3. Tabela xerb_payments
-CREATE TABLE IF NOT EXISTS public.xerb_payments (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL REFERENCES public.xerb_tenants(id) ON DELETE CASCADE,
-    amount NUMERIC(10, 2) NOT NULL,
-    plan TEXT NOT NULL CHECK (plan IN ('trial', 'start', 'pro', 'business', 'custom')),
-    payment_method TEXT DEFAULT 'pix' CHECK (payment_method IN ('pix', 'credit_card', 'boleto', 'manual', 'transfer')),
-    status TEXT DEFAULT 'confirmed' CHECK (status IN ('pending', 'confirmed', 'failed', 'refunded')),
-    paid_at TIMESTAMPTZ DEFAULT now(),
-    expires_at TIMESTAMPTZ,
-    notes TEXT,
-    created_at TIMESTAMPTZ DEFAULT now()
-);`}
-                </pre>
-              </div>
-            </div>
+            {/* Monitor do Servidor & Guardião WhatsApp */}
+            <AdminServerMonitor />
           </div>
         )}
       </main>

@@ -97,6 +97,11 @@ export default function LiveChat({ tenantId }: LiveChatProps) {
         setSoundEnabled(false);
         soundEnabledRef.current = false;
       }
+      const chatParam = new URLSearchParams(window.location.search).get('chat');
+      if (chatParam) {
+        setSelectedConvId(chatParam);
+        setMobileShowChat(true);
+      }
     }
   }, []);
 
@@ -139,7 +144,17 @@ export default function LiveChat({ tenantId }: LiveChatProps) {
 
       if (data) {
         setConversations(data);
-        setSelectedConvId((curr) => curr || (data.length > 0 ? data[0].id : null));
+        setSelectedConvId((curr) => {
+          if (curr) return curr;
+          if (typeof window !== 'undefined') {
+            const p = new URLSearchParams(window.location.search).get('chat');
+            if (p && data.some((c) => c.id === p)) {
+              setMobileShowChat(true);
+              return p;
+            }
+          }
+          return data.length > 0 ? data[0].id : null;
+        });
       }
     } catch (err) {
       console.error('Erro ao buscar conversas:', err);

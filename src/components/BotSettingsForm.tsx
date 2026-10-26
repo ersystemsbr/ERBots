@@ -43,6 +43,7 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
   const [handoffMessage, setHandoffMessage] = useState<string>(
     'Com certeza! Estou transferindo seu atendimento para nossa equipe humana. Aguarde um instante que já vamos te responder.'
   );
+  const [alertPhone, setAlertPhone] = useState<string>('');
 
   // Follow-up Automático de Oportunidades
   const [autoFollowupEnabled, setAutoFollowupEnabled] = useState<boolean>(true);
@@ -74,6 +75,10 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
         const res = await authFetch(`/api/tenant/bot-settings?tenant_id=${encodeURIComponent(tenantId)}`);
         const json = await res.json().catch(() => ({}));
         const data = json?.settings;
+
+        if (json?.alert_phone !== undefined) {
+          setAlertPhone(json.alert_phone || '');
+        }
 
         if (data) {
           setBotName(data.bot_name || 'Assistente Virtual');
@@ -150,6 +155,7 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
           human_handoff_enabled: handoffEnabled,
           human_handoff_keywords: keywordsArray,
           human_handoff_message: handoffMessage,
+          alert_phone: alertPhone,
           auto_followup_enabled: autoFollowupEnabled,
           auto_followup_delay_minutes: autoFollowupDelayMinutes,
         }),
@@ -411,6 +417,23 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
                 onChange={(e) => setHandoffMessage(e.target.value)}
                 className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500 text-sm"
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-300 mb-1">
+                WhatsApp do Gestor para Alertas (DDD + Número)
+              </label>
+              <input
+                type="text"
+                maxLength={25}
+                value={alertPhone}
+                onChange={(e) => setAlertPhone(e.target.value)}
+                placeholder="Ex: 11973232817"
+                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500 text-sm"
+              />
+              <span className="text-xs text-slate-500 mt-1 block">
+                Número que receberá aviso no WhatsApp com 1 clique para chamar o cliente ou assumir a conversa no LiveChat quando o cliente pedir atendimento humano.
+              </span>
             </div>
           </div>
         )}
