@@ -5,7 +5,6 @@ import { getEvolutionConfig, findHealthyNotifierInstance } from '@/lib/evolution
 import { getGeminiApiKey } from '@/lib/ai/gemini';
 import { isAsaasConfigured } from '@/lib/billing/asaas';
 
-export const dynamic = 'force-dynamic';
 export const maxDuration = 25;
 
 export async function GET(req: NextRequest) {
