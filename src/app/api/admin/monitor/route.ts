@@ -69,15 +69,15 @@ export async function GET(req: NextRequest) {
     const geminiKey = await getGeminiApiKey();
     const geminiConfigured = Boolean(geminiKey);
 
-    // 4. Checagem Guardião WhatsApp
+    // 4. Checagem Guardião WhatsApp (Casos de Atenção)
     const notifierInstance = await findHealthyNotifierInstance();
-    const { data: superAdmins } = await supabase
-      .from('xerb_tenants')
-      .select('name, phone, alert_phone')
-      .eq('is_super_admin', true)
-      .limit(1);
+    const { data: sysAlertCfg } = await supabase
+      .from('xerb_system_config')
+      .select('value')
+      .eq('key', 'system_alert_phone')
+      .maybeSingle();
 
-    const alertPhone = superAdmins?.[0]?.alert_phone || superAdmins?.[0]?.phone || null;
+    const alertPhone = sysAlertCfg?.value || '5511973232817';
 
     // Resumo de instâncias
     const openCount = instancesList.filter((i) => i.state.toLowerCase() === 'open').length;

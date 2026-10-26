@@ -576,6 +576,26 @@ export async function POST(req: NextRequest) {
           await sendTextMessage(notifier, ownerPhone, alertMsg).catch(() => false);
         }
 
+        // Caso de Atenção para o Super Admin (Eric)
+        const { data: sysAlertCfg } = await supabase
+          .from('xerb_system_config')
+          .select('value')
+          .eq('key', 'system_alert_phone')
+          .maybeSingle();
+        const adminAlertPhone = normalizeBrPhone(sysAlertCfg?.value);
+        if (adminAlertPhone && notifier && !samePhone(adminAlertPhone, ownerPhone)) {
+          const sysMsg = [
+            '🛡️ *[Guardião ERBots] Caso de Atenção no Sistema*',
+            '',
+            `A empresa *${tenantInfo?.name || 'Cliente'}* desconectou o WhatsApp.`,
+            `Instância: *${instanceName}*`,
+            `Status: ${statusReason || 'close'}`,
+            '',
+            `O cliente foi notificado no número dele. Acompanhe pelo painel: ${appUrl}/admin`,
+          ].join('\n');
+          await sendTextMessage(notifier, adminAlertPhone, sysMsg).catch(() => false);
+        }
+
         // E-mail opcional via Resend caso RESEND_API_KEY esteja configurada
         const resendKey = process.env.RESEND_API_KEY;
         const fromEmail = process.env.ALERT_FROM_EMAIL || 'ERBots <alertas@erbots.com.br>';

@@ -421,18 +421,18 @@ export default function BotSettingsForm({ tenantId }: BotSettingsFormProps) {
 
             <div>
               <label className="block text-sm font-semibold text-slate-300 mb-1">
-                WhatsApp do Gestor para Alertas (DDD + Número)
+                WhatsApp do Atendente Humano / Gestor da sua Empresa (DDD + Número)
               </label>
               <input
                 type="text"
                 maxLength={25}
                 value={alertPhone}
                 onChange={(e) => setAlertPhone(e.target.value)}
-                placeholder="Ex: 11973232817"
+                placeholder="Ex: 11999998888"
                 className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-emerald-500 text-sm"
               />
               <span className="text-xs text-slate-500 mt-1 block">
-                Número que receberá aviso no WhatsApp com 1 clique para chamar o cliente ou assumir a conversa no LiveChat quando o cliente pedir atendimento humano.
+                Número de WhatsApp da sua equipe que receberá o aviso com 1 clique para chamar o cliente ou assumir a conversa no LiveChat quando o cliente pedir atendimento humano.
               </span>
             </div>
           </div>

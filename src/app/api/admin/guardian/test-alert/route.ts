@@ -25,17 +25,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Localiza o telefone de alerta do Super Admin ou da empresa
-    const { data: superAdmins } = await supabase
-      .from('xerb_tenants')
-      .select('name, phone, alert_phone')
-      .eq('is_super_admin', true)
-      .limit(1);
+    // 2. Localiza o telefone do Super Admin para casos de atenção no sistema
+    const { data: sysCfg } = await supabase
+      .from('xerb_system_config')
+      .select('value')
+      .eq('key', 'system_alert_phone')
+      .maybeSingle();
 
-    const superAdmin = superAdmins?.[0];
     const targetPhone =
-      normalizeBrPhone(superAdmin?.alert_phone) ||
-      normalizeBrPhone(superAdmin?.phone) ||
+      normalizeBrPhone(sysCfg?.value) ||
       '5511973232817';
 
     const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://www.erbots.com.br').replace(/\/+$/, '');
@@ -44,7 +42,7 @@ export async function POST(req: NextRequest) {
     const message = [
       '🛡️ *ERBots – Teste do Guardião WhatsApp*',
       '',
-      `Olá, *${superAdmin?.name || 'Administrador'}*!`,
+      `Olá, *Eric (Super Admin)*!`,
       `Este é um teste manual de verificação do Guardião realizado às *${nowBrt}*.`,
       '',
       `✅ Instância emissora: *${notifier}*`,
