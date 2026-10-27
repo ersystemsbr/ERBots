@@ -120,6 +120,7 @@ export async function POST(req: NextRequest) {
       .from('xerb_tenants')
       .insert({
         user_id: userId,
+        user_saas: userId,
         name: cleanCompany,
         slug,
         segment: segment || 'Geral',

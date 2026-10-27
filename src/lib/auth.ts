@@ -103,6 +103,7 @@ export async function requireTenantAccess(
         slug: string;
         phone: string | null;
         user_id: string | null;
+        user_saas?: string | null;
         plan?: string | null;
         is_super_admin?: boolean | null;
         segment?: string | null;
@@ -121,7 +122,7 @@ export async function requireTenantAccess(
   const supabase = getServiceSupabase();
   const { data: tenant } = await supabase
     .from('xerb_tenants')
-    .select('id, name, slug, phone, user_id, plan, is_super_admin, segment, alert_phone')
+    .select('id, name, slug, phone, user_id, user_saas, plan, is_super_admin, segment, alert_phone')
     .eq('id', tenantId)
     .maybeSingle();
 
@@ -129,7 +130,7 @@ export async function requireTenantAccess(
     return { ok: false, response: NextResponse.json({ error: 'Empresa não encontrada.' }, { status: 404 }) };
   }
 
-  if (!ctx.isSuperAdmin && tenant.user_id !== ctx.userId) {
+  if (!ctx.isSuperAdmin && tenant.user_id !== ctx.userId && tenant.user_saas !== ctx.userId) {
     return { ok: false, response: forbidden('Você não tem permissão para acessar esta empresa.') };
   }
 

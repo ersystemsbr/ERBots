@@ -33,15 +33,23 @@ export async function POST(req: NextRequest) {
 
     const supabase = getServiceSupabase();
 
-    // 1. Já vinculado por user_id
+    // 1. Já vinculado por user_id ou user_saas
     const { data: owned } = await supabase
       .from('xerb_tenants')
       .select('*')
-      .eq('user_id', ctx.userId)
+      .or(`user_id.eq.${ctx.userId},user_saas.eq.${ctx.userId}`)
       .order('created_at', { ascending: false })
       .limit(1);
 
     if (owned && owned.length > 0) {
+      // Garante que user_saas esteja preenchido
+      if (!owned[0].user_saas) {
+        await supabase
+          .from('xerb_tenants')
+          .update({ user_saas: ctx.userId })
+          .eq('id', owned[0].id);
+        owned[0].user_saas = ctx.userId;
+      }
       return NextResponse.json({ tenant: owned[0], isSuperAdmin: ctx.isSuperAdmin });
     }
 
@@ -58,7 +66,11 @@ export async function POST(req: NextRequest) {
       if (orphan && orphan.length > 0) {
         const { data: claimed, error: claimErr } = await supabase
           .from('xerb_tenants')
-          .update({ user_id: ctx.userId, updated_at: new Date().toISOString() })
+          .update({
+            user_id: ctx.userId,
+            user_saas: ctx.userId,
+            updated_at: new Date().toISOString(),
+          })
           .eq('id', orphan[0].id)
           .is('user_id', null)
           .select()
@@ -80,6 +92,7 @@ export async function POST(req: NextRequest) {
       .from('xerb_tenants')
       .insert({
         user_id: ctx.userId,
+        user_saas: ctx.userId,
         name: compName,
         slug: buildSlug(compName),
         segment: 'Geral',
@@ -97,7 +110,7 @@ export async function POST(req: NextRequest) {
         const { data: raced } = await supabase
           .from('xerb_tenants')
           .select('*')
-          .eq('user_id', ctx.userId)
+          .or(`user_id.eq.${ctx.userId},user_saas.eq.${ctx.userId}`)
           .limit(1);
         if (raced && raced.length > 0) {
           return NextResponse.json({ tenant: raced[0], isSuperAdmin: ctx.isSuperAdmin });
