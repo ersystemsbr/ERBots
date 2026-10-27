@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Bot, CheckCircle2, ArrowRight, Building2, User, Phone, Mail, Lock } from 'lucide-react';
@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase';
 
 export default function CadastroPage() {
   const router = useRouter();
+  const [checkingAuth, setCheckingAuth] = useState<boolean>(true);
   const [loading, setLoading] = useState<boolean>(false);
   const [loadingGoogle, setLoadingGoogle] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -20,6 +21,30 @@ export default function CadastroPage() {
   const [password, setPassword] = useState<string>('');
   const [website, setWebsite] = useState<string>(''); // Honeypot anti-bot
   const [acceptedTerms, setAcceptedTerms] = useState<boolean>(false);
+
+  // Se já estiver autenticado (ex: reabriu a aba no celular), vai direto para o dashboard
+  useEffect(() => {
+    let mounted = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      if (data.session) {
+        router.replace('/dashboard');
+      } else {
+        setCheckingAuth(false);
+      }
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session && mounted) {
+        router.replace('/dashboard');
+      }
+    });
+
+    return () => {
+      mounted = false;
+      authListener?.subscription?.unsubscribe();
+    };
+  }, [router]);
 
   const handleGoogleSignup = async () => {
     setErrorMsg(null);
@@ -97,6 +122,15 @@ export default function CadastroPage() {
       setLoading(false);
     }
   };
+
+  if (checkingAuth) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-400 gap-3">
+        <div className="w-8 h-8 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin" />
+        <span className="text-xs font-medium">Verificando sessão...</span>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans selection:bg-emerald-500 selection:text-slate-950">
