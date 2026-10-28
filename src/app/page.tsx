@@ -1,6 +1,7 @@
 import React from 'react';
 import Link from 'next/link';
 import PricingSection from '@/components/PricingSection';
+import SessionRedirect from '@/components/SessionRedirect';
 import {
   Bot,
   MessageSquare,
@@ -45,6 +46,7 @@ const FAQS = [
 export default function HomePage() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-slate-950">
+      <SessionRedirect />
       {/* Header */}
       <header className="border-b border-slate-900 bg-slate-950/80 backdrop-blur sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">

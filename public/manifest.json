@@ -1,0 +1,24 @@
+{
+  "name": "ERBots | Atendente Virtual WhatsApp",
+  "short_name": "ERBots",
+  "description": "Automatize o atendimento no WhatsApp da sua empresa 24h com IA humanizada.",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#10b981",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon.ico",
+      "sizes": "48x48",
+      "type": "image/x-icon"
+    }
+  ]
+}

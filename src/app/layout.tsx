@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -12,8 +12,17 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+export const viewport: Viewport = {
+  themeColor: "#020617",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+};
+
 export const metadata: Metadata = {
   metadataBase: new URL("https://www.erbots.com.br"),
+  manifest: "/manifest.json",
   title: {
     default: "ERBots | Atendentes Virtuais Inteligentes no WhatsApp",
     template: "%s | ERBots",
@@ -29,6 +38,15 @@ export const metadata: Metadata = {
     "atendimento automatico 24h",
   ],
   authors: [{ name: "ERBots — ER Systems" }],
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "ERBots",
+  },
+  icons: {
+    icon: "/icon.svg",
+    apple: "/icon.svg",
+  },
   openGraph: {
     title: "ERBots | Atendentes Virtuais Inteligentes no WhatsApp",
     description:
@@ -40,7 +58,11 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html
       lang="pt-BR"

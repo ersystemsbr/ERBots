@@ -14,6 +14,7 @@ import { checkAiGate, recordUsage } from '@/lib/billing/usage';
 import { getAddonsConfig, getPlansConfig } from '@/lib/billing/plans-config';
 import { currentUsagePeriod, formatBRL, getPlan, computeAnnualPricing } from '@/lib/plans';
 import { logSystemEvent } from '@/lib/monitoring';
+import { dispatchOutboundWebhook } from '@/lib/outbound-webhook';
 
 export const maxDuration = 60;
 
@@ -854,6 +855,15 @@ export async function POST(req: NextRequest) {
     }
     await recordUsage(supabase, tenantId, { messagesIn: 1 });
 
+    // Notifica sistemas externos (CRM / GastroSys) via webhook de saída
+    dispatchOutboundWebhook(tenantId, 'message.received', {
+      contactPhone: cleanPhone,
+      contactName: conversation.contact_name || pushName || null,
+      messageContent: userText,
+      direction: 'in',
+      sender: 'user',
+    });
+
     // 7. Conversa com atendente humano: a IA NÃO responde (até o dono devolver ou o prazo vencer)
     if (conversation.handling_status === 'HUMAN') {
       const { data: lastOut } = await supabase
@@ -1042,6 +1052,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, replied: false, reason: 'send_failed' });
     }
 
+    // Notifica sistemas externos (CRM) que a IA respondeu
+    dispatchOutboundWebhook(tenantId, 'message.sent', {
+      contactPhone: cleanPhone,
+      contactName: pushName || conversation.contact_name || null,
+      messageContent: aiResult.reply,
+      direction: 'out',
+      sender: 'ai',
+    });
+
     // 11. Atualiza o status da conversa + registra oportunidade (xerb_leads) + avisa o dono
     const newStatus = aiResult.triggerHandoff ? 'HUMAN' : 'AI';
     await supabase
@@ -1065,6 +1084,28 @@ export async function POST(req: NextRequest) {
         lead: aiResult.capturedLead,
       });
       shouldNotifyLead = leadRes.shouldNotify;
+
+      if (shouldNotifyLead) {
+        dispatchOutboundWebhook(tenantId, 'lead.captured', {
+          contactPhone: cleanPhone,
+          contactName: pushName || conversation.contact_name || null,
+          leadData: {
+            interest: aiResult.capturedLead.interest,
+            preferredSlot: aiResult.capturedLead.preferredSlot,
+            notes: aiResult.capturedLead.notes,
+          },
+        });
+      }
+    }
+
+    if (aiResult.triggerHandoff) {
+      dispatchOutboundWebhook(tenantId, 'human_handoff.requested', {
+        contactPhone: cleanPhone,
+        contactName: pushName || conversation.contact_name || null,
+        messageContent: incomingBlock,
+        direction: 'in',
+        sender: 'user',
+      });
     }
 
     if (aiResult.triggerHandoff || shouldNotifyLead) {
