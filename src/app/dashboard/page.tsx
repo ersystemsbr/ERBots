@@ -14,7 +14,7 @@ import OnboardingChecklist from '@/components/OnboardingChecklist';
 import { supabase } from '@/lib/supabase';
 import { authFetch } from '@/lib/api-client';
 import { getAccessState } from '@/lib/plans';
-import { Loader2, WifiOff } from 'lucide-react';
+import { Loader2, WifiOff, Bot, Sparkles, BookOpen, ShieldCheck, Building2 } from 'lucide-react';
 
 interface InstanceSnapshot {
   status: string;
@@ -24,12 +24,30 @@ interface InstanceSnapshot {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [currentTab, setCurrentTab] = useState<string>('whatsapp');
+  const [currentTab, setCurrentTab] = useState<string>('chat');
+  const [settingsSubTab, setSettingsSubTab] = useState<string>('whatsapp');
   const [tenant, setTenant] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [unexpectedDisconnect, setUnexpectedDisconnect] = useState<boolean>(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(false);
+
+  const settingsTabs = [
+    { id: 'whatsapp', label: 'Conexão WhatsApp', icon: Bot },
+    { id: 'bot-settings', label: 'Personalizar IA', icon: Sparkles },
+    { id: 'knowledge', label: 'Base de Conhecimento', icon: BookOpen },
+    { id: 'plans', label: 'Planos & Assinaturas', icon: ShieldCheck },
+    { id: 'profile', label: 'Dados da Empresa', icon: Building2 },
+  ];
+
+  const handleNavigate = (tab: string) => {
+    if (['whatsapp', 'bot-settings', 'knowledge', 'plans', 'profile'].includes(tab)) {
+      setCurrentTab('settings');
+      setSettingsSubTab(tab);
+    } else {
+      setCurrentTab(tab);
+    }
+  };
 
   const applyInstanceSnapshot = (inst?: InstanceSnapshot | null) => {
     if (!inst) {
@@ -166,7 +184,7 @@ export default function DashboardPage() {
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {unexpectedDisconnect && currentTab !== 'whatsapp' && (
+        {unexpectedDisconnect && !(currentTab === 'settings' && settingsSubTab === 'whatsapp') && (
           <div className="mb-6 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm text-rose-200">
             <div className="flex items-center gap-2.5">
               <WifiOff className="w-5 h-5 text-rose-400 shrink-0" />
@@ -175,7 +193,7 @@ export default function DashboardPage() {
               </span>
             </div>
             <button
-              onClick={() => setCurrentTab('whatsapp')}
+              onClick={() => handleNavigate('whatsapp')}
               className="shrink-0 px-4 py-1.5 bg-rose-500 hover:bg-rose-400 text-slate-950 font-bold text-xs rounded-lg transition"
             >
               Reconectar WhatsApp
@@ -183,7 +201,7 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {showBanner && currentTab !== 'plans' && (
+        {showBanner && !(currentTab === 'settings' && settingsSubTab === 'plans') && (
           <div
             className={`mb-6 rounded-xl border px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm ${
               !access.allowed
@@ -193,7 +211,7 @@ export default function DashboardPage() {
           >
             <span>{access.message}</span>
             <button
-              onClick={() => setCurrentTab('plans')}
+              onClick={() => handleNavigate('plans')}
               className="shrink-0 px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-lg transition"
             >
               {!access.allowed ? 'Reativar agora' : 'Ver planos'}
@@ -201,48 +219,83 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {tenantId && (
-          <OnboardingChecklist
-            tenantId={tenantId}
-            isConnected={isConnected}
-            onNavigateTab={setCurrentTab}
-          />
-        )}
-
-        {currentTab === 'whatsapp' && (
-          <WhatsAppConnector
-            tenantId={tenantId}
-            tenantSlug={tenantSlug}
-            onStatusChange={(connected) => {
-              setIsConnected(connected);
-              if (connected) setUnexpectedDisconnect(false);
-            }}
-          />
-        )}
-
+        {/* ABA: Live Chat */}
         {currentTab === 'chat' && <LiveChat tenantId={tenantId} />}
 
+        {/* ABA: Resultados / Métricas */}
         {currentTab === 'analytics' && (
-          <AnalyticsDashboard tenantId={tenantId} onNavigateTab={setCurrentTab} />
+          <AnalyticsDashboard tenantId={tenantId} onNavigateTab={handleNavigate} />
         )}
 
-        {currentTab === 'bot-settings' && <BotSettingsForm tenantId={tenantId} />}
+        {/* ABA: Configurações (com Guia Rápido exclusivo e sub-abas no formato do Painel Master) */}
+        {currentTab === 'settings' && (
+          <div className="space-y-6">
+            {/* Card do Guia Rápido de Ativação (exclusivo dentro de Configurações) */}
+            {tenantId && (
+              <OnboardingChecklist
+                tenantId={tenantId}
+                isConnected={isConnected}
+                onNavigateTab={handleNavigate}
+              />
+            )}
 
-        {currentTab === 'knowledge' && (
-          <KnowledgeBaseManager tenantId={tenantId} tenantSegment={tenant?.segment} />
-        )}
+            {/* Navegação por Sub-Abas no mesmo formato das abas do Painel Master */}
+            <div className="flex border-b border-slate-800 space-x-6 sm:space-x-8 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+              {settingsTabs.map((tab) => {
+                const Icon = tab.icon;
+                const isActive = settingsSubTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setSettingsSubTab(tab.id)}
+                    className={`pb-4 text-sm font-semibold flex items-center gap-2 border-b-2 transition whitespace-nowrap shrink-0 ${
+                      isActive
+                        ? 'border-emerald-400 text-emerald-400'
+                        : 'border-transparent text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Icon className="w-4 h-4" />
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
 
-        {currentTab === 'plans' && (
-          <SubscriptionPlans tenant={tenant} onTenantUpdated={setTenant} />
-        )}
+            {/* Conteúdo da Sub-Aba de Configurações ativa */}
+            <div>
+              {settingsSubTab === 'whatsapp' && (
+                <WhatsAppConnector
+                  tenantId={tenantId}
+                  tenantSlug={tenantSlug}
+                  onStatusChange={(connected) => {
+                    setIsConnected(connected);
+                    if (connected) setUnexpectedDisconnect(false);
+                  }}
+                />
+              )}
 
-        {currentTab === 'profile' && (
-          <UserProfileManager
-            tenant={tenant}
-            onTenantUpdated={setTenant}
-            onNavigateToPlans={() => setCurrentTab('plans')}
-            isSuperAdmin={isSuperAdmin}
-          />
+              {settingsSubTab === 'bot-settings' && (
+                <BotSettingsForm tenantId={tenantId} />
+              )}
+
+              {settingsSubTab === 'knowledge' && (
+                <KnowledgeBaseManager tenantId={tenantId} tenantSegment={tenant?.segment} />
+              )}
+
+              {settingsSubTab === 'plans' && (
+                <SubscriptionPlans tenant={tenant} onTenantUpdated={setTenant} />
+              )}
+
+              {settingsSubTab === 'profile' && (
+                <UserProfileManager
+                  tenant={tenant}
+                  onTenantUpdated={setTenant}
+                  onNavigateToPlans={() => setSettingsSubTab('plans')}
+                  isSuperAdmin={isSuperAdmin}
+                />
+              )}
+            </div>
+          </div>
         )}
       </main>
     </div>
