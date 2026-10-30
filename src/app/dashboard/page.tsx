@@ -11,6 +11,7 @@ import SubscriptionPlans from '@/components/SubscriptionPlans';
 import UserProfileManager from '@/components/UserProfileManager';
 import AnalyticsDashboard from '@/components/AnalyticsDashboard';
 import OnboardingChecklist from '@/components/OnboardingChecklist';
+import ErSystemsAppsDashboard from '@/components/ErSystemsAppsDashboard';
 import { supabase } from '@/lib/supabase';
 import { authFetch } from '@/lib/api-client';
 import { getAccessState } from '@/lib/plans';
@@ -226,6 +227,9 @@ export default function DashboardPage() {
         {currentTab === 'analytics' && (
           <AnalyticsDashboard tenantId={tenantId} onNavigateTab={handleNavigate} />
         )}
+
+        {/* ABA: Apps ER Systems (Ecossistema de Soluções) */}
+        {currentTab === 'apps' && <ErSystemsAppsDashboard />}
 
         {/* ABA: Configurações (com Guia Rápido exclusivo e sub-abas no formato do Painel Master) */}
         {currentTab === 'settings' && (
