@@ -3,6 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { MessageSquare, BarChart3, Settings, Bot, LogOut } from 'lucide-react';
+import ErSystemsAppsMenu from '@/components/ErSystemsAppsMenu';
 
 interface NavbarProps {
   currentTab: string;
@@ -85,8 +86,13 @@ export default function Navbar({
             })}
           </nav>
 
-          {/* Ações da Direita: Painel Master (se superadmin) e Logout */}
-          <div className="flex items-center space-x-1 sm:space-x-2 shrink-0">
+          {/* Ações da Direita: Apps ER Systems + Painel Master (se superadmin) e Logout */}
+          <div className="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
+            {/* Menu Ecossistema ER Systems (no PC e telas maiores) */}
+            <div className="hidden md:block">
+              <ErSystemsAppsMenu />
+            </div>
+
             {isSuperAdmin && (
               <Link
                 href="/admin"
