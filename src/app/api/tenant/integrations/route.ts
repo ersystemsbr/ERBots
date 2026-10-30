@@ -10,6 +10,13 @@ export async function GET(req: NextRequest) {
     const guard = await requireTenantAccess(req, tenantId);
     if (!guard.ok) return guard.response;
 
+    if (!guard.ctx.isSuperAdmin && !guard.tenant.is_super_admin) {
+      return NextResponse.json(
+        { error: 'Acesso restrito ao Administrador Master / Desenvolvedor.' },
+        { status: 403 }
+      );
+    }
+
     const supabase = getServiceSupabase();
     let { data: tenant } = await supabase
       .from('xerb_tenants')
@@ -51,6 +58,13 @@ export async function POST(req: NextRequest) {
 
     const guard = await requireTenantAccess(req, tenant_id);
     if (!guard.ok) return guard.response;
+
+    if (!guard.ctx.isSuperAdmin && !guard.tenant.is_super_admin) {
+      return NextResponse.json(
+        { error: 'Acesso restrito ao Administrador Master / Desenvolvedor.' },
+        { status: 403 }
+      );
+    }
 
     const supabase = getServiceSupabase();
 

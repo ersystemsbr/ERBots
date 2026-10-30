@@ -64,6 +64,24 @@ function playNotificationBeep() {
   }
 }
 
+function formatDisplayPhone(rawPhone?: string | null): string {
+  if (!rawPhone) return '';
+  const clean = rawPhone.replace(/\D/g, '');
+  if (clean.length === 13 && clean.startsWith('55')) {
+    return `(${clean.slice(2, 4)}) ${clean.slice(4, 9)}-${clean.slice(9)}`;
+  }
+  if (clean.length === 12 && clean.startsWith('55')) {
+    return `(${clean.slice(2, 4)}) ${clean.slice(4, 8)}-${clean.slice(8)}`;
+  }
+  if (clean.length === 11) {
+    return `(${clean.slice(0, 2)}) ${clean.slice(2, 7)}-${clean.slice(7)}`;
+  }
+  if (clean.length === 10) {
+    return `(${clean.slice(0, 2)}) ${clean.slice(2, 6)}-${clean.slice(6)}`;
+  }
+  return rawPhone;
+}
+
 export default function LiveChat({ tenantId }: LiveChatProps) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
@@ -532,6 +550,20 @@ export default function LiveChat({ tenantId }: LiveChatProps) {
               const isAI = conv.handling_status === 'AI';
               const unread = conv.unread_count || 0;
 
+              const rawPhone =
+                conv.contact_phone ||
+                (conv.remote_jid ? conv.remote_jid.replace(/@s\.whatsapp\.net$/i, '').replace(/@c\.us$/i, '') : '');
+              const displayPhone = formatDisplayPhone(rawPhone);
+
+              const cleanPhoneDigits = (rawPhone || '').replace(/\D/g, '');
+              const cleanNameDigits = (conv.contact_name || '').replace(/\D/g, '');
+              const hasDistinctName = Boolean(
+                conv.contact_name &&
+                conv.contact_name.trim() !== '' &&
+                cleanNameDigits !== cleanPhoneDigits &&
+                !conv.contact_name.startsWith('LID:')
+              );
+
               return (
                 <button
                   key={conv.id}
@@ -541,9 +573,24 @@ export default function LiveChat({ tenantId }: LiveChatProps) {
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-semibold text-white truncate">
-                      {conv.contact_name || conv.contact_phone}
-                    </span>
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1 truncate">
+                      {displayPhone ? (
+                        <>
+                          <span className="font-mono text-xs font-bold text-emerald-400 shrink-0">
+                            {displayPhone}
+                          </span>
+                          {hasDistinctName && (
+                            <span className="text-sm font-semibold text-white truncate">
+                              • {conv.contact_name}
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-sm font-semibold text-white truncate">
+                          {conv.contact_name || 'Sem identificação'}
+                        </span>
+                      )}
+                    </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       {unread > 0 && (
                         <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-extrabold flex items-center justify-center">

@@ -241,6 +241,7 @@ export default function DashboardPage() {
             tenant={tenant}
             onTenantUpdated={setTenant}
             onNavigateToPlans={() => setCurrentTab('plans')}
+            isSuperAdmin={isSuperAdmin}
           />
         )}
       </main>

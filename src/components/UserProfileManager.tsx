@@ -27,6 +27,7 @@ interface UserProfileManagerProps {
   tenant: any;
   onTenantUpdated: (updatedTenant: any) => void;
   onNavigateToPlans?: () => void;
+  isSuperAdmin?: boolean;
 }
 
 const SEGMENT_OPTIONS = [
@@ -47,7 +48,9 @@ export default function UserProfileManager({
   tenant,
   onTenantUpdated,
   onNavigateToPlans,
+  isSuperAdmin = false,
 }: UserProfileManagerProps) {
+  const isMaster = Boolean(isSuperAdmin || tenant?.is_super_admin);
   // Dados da Empresa
   const [name, setName] = useState(tenant?.name || '');
   const [segment, setSegment] = useState(tenant?.segment || 'Clínicas & Saúde');
@@ -81,7 +84,7 @@ export default function UserProfileManager({
   const [integrationsMsg, setIntegrationsMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
-    if (tenant?.id) {
+    if (tenant?.id && isMaster) {
       authFetch(`/api/tenant/integrations?tenant_id=${encodeURIComponent(tenant.id)}`)
         .then((res) => (res.ok ? res.json() : null))
         .then((data) => {
@@ -533,143 +536,145 @@ export default function UserProfileManager({
         )}
       </div>
 
-      {/* Cartão de Integrações Externas & API Key */}
-      <form onSubmit={handleSaveIntegrations} className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 space-y-5 shadow-xl">
-        <div className="border-b border-slate-800 pb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-bold text-white flex items-center gap-2">
-              <Zap className="w-5 h-5 text-indigo-400" />
-              Chaves de API & Integrações Externas (CRM / GastroSys)
-            </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Conecte seu CRM, sistema de gestão ou automações para disparar mensagens e receber leads do WhatsApp em tempo real.
+      {/* Cartão de Integrações Externas & API Key (Exclusivo para Dev / Admin Master) */}
+      {isMaster && (
+        <form onSubmit={handleSaveIntegrations} className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 space-y-5 shadow-xl">
+          <div className="border-b border-slate-800 pb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <Zap className="w-5 h-5 text-indigo-400" />
+                Chaves de API & Integrações Externas (CRM / GastroSys)
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Conecte seu CRM, sistema de gestão ou automações para disparar mensagens e receber leads do WhatsApp em tempo real.
+              </p>
+            </div>
+            <span className="text-[11px] font-mono font-semibold px-2.5 py-1 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shrink-0 w-fit">
+              Master / Dev Only
+            </span>
+          </div>
+
+          {integrationsMsg && (
+            <div
+              className={`p-3.5 rounded-xl border flex items-center gap-2.5 text-xs font-medium ${
+                integrationsMsg.type === 'success'
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                  : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+              }`}
+            >
+              {integrationsMsg.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 shrink-0" />
+              )}
+              <span>{integrationsMsg.text}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {/* Server URL */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                URL do Servidor ERBots (ERBOTS_SERVER_URL)
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={serverUrl}
+                  className="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-2.5 text-xs font-mono text-slate-300 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleCopyServerUrl}
+                  className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 hover:text-white transition shrink-0"
+                  title="Copiar URL do Servidor"
+                >
+                  {copiedServerUrl ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1">Cole esta URL no seu CRM para apontar ao ERBots.</p>
+            </div>
+
+            {/* API Key */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-semibold text-slate-300">
+                  Chave Secreta de API (ERBOTS_API_KEY)
+                </label>
+                <button
+                  type="button"
+                  onClick={handleRegenerateApiKey}
+                  disabled={regeneratingKey}
+                  className="text-[11px] text-slate-400 hover:text-amber-400 flex items-center gap-1 transition"
+                >
+                  <RefreshCw className={`w-3 h-3 ${regeneratingKey ? 'animate-spin' : ''}`} />
+                  <span>Regenerar chave</span>
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={apiKey || 'Gerando chave...'}
+                  className="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-2.5 text-xs font-mono text-emerald-400 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleCopyApiKey}
+                  disabled={!apiKey}
+                  className="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white transition shrink-0 shadow-xs"
+                  title="Copiar Chave de API"
+                >
+                  {copiedApiKey ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-1">Chave exclusiva da sua empresa. Não compartilhe publicamente.</p>
+            </div>
+          </div>
+
+          {/* Webhook de Saída */}
+          <div className="pt-3 border-t border-slate-800/80">
+            <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+              URL do Webhook do seu CRM (Disparo Automático de Leads e Mensagens)
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="sm:col-span-2">
+                <input
+                  type="url"
+                  value={webhookUrl}
+                  onChange={(e) => setWebhookUrl(e.target.value)}
+                  placeholder="https://crm61.vercel.app/api/erbots/webhook"
+                  className="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono transition"
+                />
+              </div>
+              <div>
+                <input
+                  type="text"
+                  value={webhookSecret}
+                  onChange={(e) => setWebhookSecret(e.target.value)}
+                  placeholder="Segredo opcional (secret)"
+                  className="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono transition"
+                />
+              </div>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1.5">
+              O ERBots enviará requisições POST para esta URL assim que mensagens chegarem ou leads forem capturados.
             </p>
           </div>
-          <span className="text-[11px] font-mono font-semibold px-2.5 py-1 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shrink-0 w-fit">
-            API REST v1 Headless
-          </span>
-        </div>
 
-        {integrationsMsg && (
-          <div
-            className={`p-3.5 rounded-xl border flex items-center gap-2.5 text-xs font-medium ${
-              integrationsMsg.type === 'success'
-                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
-            }`}
-          >
-            {integrationsMsg.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
-            ) : (
-              <AlertCircle className="w-4 h-4 shrink-0" />
-            )}
-            <span>{integrationsMsg.text}</span>
+          <div className="pt-3 border-t border-slate-800 flex justify-end">
+            <button
+              type="submit"
+              disabled={savingIntegrations}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs transition disabled:opacity-50"
+            >
+              {savingIntegrations ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {savingIntegrations ? 'Salvando...' : 'Salvar Parâmetros de Integração'}
+            </button>
           </div>
-        )}
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          {/* Server URL */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-              URL do Servidor ERBots (ERBOTS_SERVER_URL)
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                readOnly
-                value={serverUrl}
-                className="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-2.5 text-xs font-mono text-slate-300 focus:outline-none"
-              />
-              <button
-                type="button"
-                onClick={handleCopyServerUrl}
-                className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 hover:text-white transition shrink-0"
-                title="Copiar URL do Servidor"
-              >
-                {copiedServerUrl ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-              </button>
-            </div>
-            <p className="text-[11px] text-slate-500 mt-1">Cole esta URL no seu CRM para apontar ao ERBots.</p>
-          </div>
-
-          {/* API Key */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-xs font-semibold text-slate-300">
-                Chave Secreta de API (ERBOTS_API_KEY)
-              </label>
-              <button
-                type="button"
-                onClick={handleRegenerateApiKey}
-                disabled={regeneratingKey}
-                className="text-[11px] text-slate-400 hover:text-amber-400 flex items-center gap-1 transition"
-              >
-                <RefreshCw className={`w-3 h-3 ${regeneratingKey ? 'animate-spin' : ''}`} />
-                <span>Regenerar chave</span>
-              </button>
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                readOnly
-                value={apiKey || 'Gerando chave...'}
-                className="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-2.5 text-xs font-mono text-emerald-400 focus:outline-none"
-              />
-              <button
-                type="button"
-                onClick={handleCopyApiKey}
-                disabled={!apiKey}
-                className="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white transition shrink-0 shadow-xs"
-                title="Copiar Chave de API"
-              >
-                {copiedApiKey ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-              </button>
-            </div>
-            <p className="text-[11px] text-slate-500 mt-1">Chave exclusiva da sua empresa. Não compartilhe publicamente.</p>
-          </div>
-        </div>
-
-        {/* Webhook de Saída */}
-        <div className="pt-3 border-t border-slate-800/80">
-          <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-            URL do Webhook do seu CRM (Disparo Automático de Leads e Mensagens)
-          </label>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="sm:col-span-2">
-              <input
-                type="url"
-                value={webhookUrl}
-                onChange={(e) => setWebhookUrl(e.target.value)}
-                placeholder="https://crm61.vercel.app/api/erbots/webhook"
-                className="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono transition"
-              />
-            </div>
-            <div>
-              <input
-                type="text"
-                value={webhookSecret}
-                onChange={(e) => setWebhookSecret(e.target.value)}
-                placeholder="Segredo opcional (secret)"
-                className="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono transition"
-              />
-            </div>
-          </div>
-          <p className="text-[11px] text-slate-400 mt-1.5">
-            O ERBots enviará requisições POST para esta URL assim que mensagens chegarem ou leads forem capturados.
-          </p>
-        </div>
-
-        <div className="pt-3 border-t border-slate-800 flex justify-end">
-          <button
-            type="submit"
-            disabled={savingIntegrations}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs transition disabled:opacity-50"
-          >
-            {savingIntegrations ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            {savingIntegrations ? 'Salvando...' : 'Salvar Parâmetros de Integração'}
-          </button>
-        </div>
-      </form>
+        </form>
+      )}
 
       {/* Cartão de Segurança: Alteração de Senha */}
       <form onSubmit={handleChangePassword} className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 space-y-5 shadow-xl">
