@@ -61,14 +61,18 @@ export async function POST(req: NextRequest) {
       is_active,
     } = body;
 
+    const cleanUsername = String(account_username || '')
+      .replace(/^@+/, '')
+      .trim();
+
     const payload = {
       tenant_id: tenant.id,
-      account_name: account_name || 'Conta Instagram',
-      account_username: (account_username || '').replace(/^@/, ''),
+      account_name: account_name || tenant.name || 'Conta Instagram',
+      account_username: cleanUsername,
       niche: niche || 'Geral',
       target_audience: target_audience || 'Clientes locais',
-      brand_voice: brand_voice || 'Profissional e acolhedor',
-      visual_style: visual_style || 'Fotografia realista limpa',
+      brand_voice: brand_voice || 'Profissional e autêntico',
+      visual_style: visual_style || 'Fotografia comercial em estúdio',
       approval_mode: approval_mode === 'auto_scheduled' ? 'auto_scheduled' : 'whatsapp_required',
       approval_timeout_hours: Number(approval_timeout_hours) || 4,
       timeout_action: timeout_action === 'skip' ? 'skip' : 'auto_publish',

@@ -13,6 +13,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Tenant não encontrado' }, { status: 404 });
     }
 
+    const body = await req.json().catch(() => ({}));
     const db = getServiceSupabase();
     const { data: account } = await db
       .from('xerb_instagram_accounts')
@@ -21,16 +22,22 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (!account) {
-      return NextResponse.json({ error: 'Configure primeiro os dados da conta do Instagram.' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Configure primeiro os dados básicos da conta do Instagram no painel.' },
+        { status: 400 }
+      );
     }
 
-    // Gera o Knowledge Digest sintetizado
+    // Gera o Knowledge Digest sintetizado (padrão voice.md)
     const digest = await generateKnowledgeDigest({
-      companyName: tenant?.name || 'Sua Empresa',
-      niche: account.niche || 'Geral',
-      targetAudience: account.target_audience || 'Clientes locais',
-      brandVoice: account.brand_voice || 'Profissional e acolhedor',
-      visualStyle: account.visual_style || 'Fotografia realista',
+      companyName: account.account_name || tenant?.name || 'Sua Empresa',
+      niche: body.niche || account.niche || 'Geral',
+      targetAudience: body.target_audience || account.target_audience || 'Clientes locais',
+      brandVoice: body.brand_voice || account.brand_voice || 'Profissional e acolhedor',
+      visualStyle: body.visual_style || account.visual_style || 'Fotografia comercial em estúdio',
+      wordsIUse: body.wordsIUse,
+      wordsINeverSay: body.wordsINeverSay,
+      offLimitsTopics: body.offLimitsTopics,
     });
 
     const now = new Date().toISOString();
@@ -48,6 +55,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, digest, updated_at: now });
   } catch (err: any) {
     console.error('[API Instagram Digest POST]', err);
-    return NextResponse.json({ error: err?.message || 'Erro ao gerar Knowledge Digest' }, { status: 500 });
+    return NextResponse.json(
+      { error: err?.message || 'Erro ao gerar Guia de Voz e Knowledge Digest' },
+      { status: 500 }
+    );
   }
 }

@@ -14,7 +14,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Tenant não encontrado' }, { status: 404 });
     }
 
-    const { topicHint } = await req.json().catch(() => ({}));
+    const { topicHint, format } = await req.json().catch(() => ({}));
+    const selectedFormat = (format === 'carousel' || format === 'reel_script') ? format : 'single_image';
 
     const db = getServiceSupabase();
     const { data: account } = await db
@@ -30,16 +31,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 1. Gera o conteúdo do post (gancho, legenda, hashtags e prompt de imagem)
+    // 1. Gera o conteúdo do post (gancho, legenda, hashtags, roteiro/slides e prompt de imagem)
     const postData = await generateViralPost({
       companyName: tenant?.name || 'Sua Empresa',
       niche: account.niche || 'Geral',
+      format: selectedFormat,
       knowledgeDigest: account.brand_knowledge_digest,
       topicHint: topicHint || undefined,
       visualStyle: account.visual_style || undefined,
     });
 
-    // 2. Gera a imagem promocional com IA (Imagen 3 / Gemini)
+    // 2. Gera a imagem comercial com IA (capa ou post único)
     const imageUrl = await generatePostImage(postData.image_prompt);
 
     // 3. Define status inicial e agendamento
@@ -47,36 +49,59 @@ export async function POST(req: NextRequest) {
     const status = isApprovalRequired ? 'pending_approval' : 'scheduled';
 
     const preferredTime = account.preferred_post_time || '18:00:00';
-    const [hours, minutes] = preferredTime.split(':').map(Number);
+    const [hours, minutes] = (preferredTime || '18:00').split(':').map(Number);
     const scheduledFor = new Date();
     scheduledFor.setHours(hours || 18, minutes || 0, 0, 0);
     if (scheduledFor.getTime() <= Date.now()) {
       scheduledFor.setDate(scheduledFor.getDate() + 1);
     }
 
-    // 4. Salva o post no banco de dados
+    // 4. Monta notas visuais com script ou slides se aplicável
+    let fullVisualNotes = postData.visual_notes || '';
+    if (selectedFormat === 'reel_script' && postData.reel_script) {
+      fullVisualNotes = JSON.stringify({
+        notes: postData.visual_notes,
+        hook_score: postData.hook_score,
+        reel_script: postData.reel_script,
+      });
+    } else if (selectedFormat === 'carousel' && postData.carousel_slides) {
+      fullVisualNotes = JSON.stringify({
+        notes: postData.visual_notes,
+        hook_score: postData.hook_score,
+        carousel_slides: postData.carousel_slides,
+      });
+    }
+
+    // 5. Salva o post no banco de dados
     const { data: createdPost, error: insertError } = await db
       .from('xerb_instagram_posts')
       .insert({
         tenant_id: tenant.id,
         account_id: account.id,
-        post_type: 'single_image',
+        post_type: selectedFormat,
         hook_title: postData.hook_title,
         caption: postData.caption,
         hashtags: postData.hashtags,
         media_urls: [imageUrl],
         image_prompt: postData.image_prompt,
-        visual_notes: postData.visual_notes,
+        visual_notes: fullVisualNotes,
         status,
         approval_requested_at: isApprovalRequired ? new Date().toISOString() : null,
         scheduled_for: scheduledFor.toISOString(),
+        metrics: {
+          likes: 0,
+          comments: 0,
+          reach: 0,
+          saves: 0,
+          hook_score: postData.hook_score || 90,
+        },
       })
       .select()
       .single();
 
     if (insertError) throw insertError;
 
-    // 5. Se for aprovação via WhatsApp, despacha a notificação
+    // 6. Se for aprovação via WhatsApp, despacha a notificação
     if (isApprovalRequired && tenant?.phone) {
       const cleanPhone = normalizeBrPhone(tenant.phone);
       if (cleanPhone) {
@@ -88,29 +113,48 @@ export async function POST(req: NextRequest) {
           .maybeSingle();
 
         if (instance?.instance_name) {
+          const typeLabel =
+            selectedFormat === 'reel_script'
+              ? '🎬 Roteiro de Reels'
+              : selectedFormat === 'carousel'
+              ? '📑 Carrossel Didático'
+              : '📸 Post com Foto IA';
+
           const approvalMsg = `📢 *Novo Post Criado pelo Agente de Instagram!*
           
-📌 *Gancho:* ${postData.hook_title}
+Formato: *${typeLabel}*
+📌 *Gancho (${postData.hook_score || 90}/100):* ${postData.hook_title}
 
 📝 *Prévia da Legenda:*
-${postData.caption.slice(0, 280)}...
+${postData.caption.slice(0, 240)}...
 
 ⏰ *Horário sugerido:* Hoje às ${preferredTime}
 
-👉 Responda para gerenciar:
-*1* - Aprovar e Agendar Publicação
-*2* - Gerar Outra Opção`;
+👉 *Para aprovar e agendar:* acesse o painel ERBots ou responda com "APROVAR".`;
 
-          await sendTextMessage(instance.instance_name, cleanPhone, approvalMsg).catch((e) => {
-            console.warn('[InstagramAgent] Falha ao enviar WhatsApp de aprovação:', e?.message || e);
-          });
+          sendTextMessage(
+            instance.instance_name,
+            cleanPhone,
+            approvalMsg
+          ).catch((e) => console.warn('[Instagram WhatsApp Notify] Falha silenciosa:', e?.message));
         }
       }
     }
 
-    return NextResponse.json({ success: true, post: createdPost });
+    return NextResponse.json({
+      success: true,
+      post: createdPost,
+      details: {
+        hook_score: postData.hook_score,
+        reel_script: postData.reel_script,
+        carousel_slides: postData.carousel_slides,
+      },
+    });
   } catch (err: any) {
     console.error('[API Instagram Generate POST]', err);
-    return NextResponse.json({ error: err?.message || 'Erro ao gerar publicação' }, { status: 500 });
+    return NextResponse.json(
+      { error: err?.message || 'Erro ao gerar postagem de Instagram' },
+      { status: 500 }
+    );
   }
 }
