@@ -18,19 +18,21 @@ import {
   X,
   Calendar,
   Lock,
-  MessageCircle,
   Share2,
   Copy,
   ExternalLink,
   Film,
   Layers,
-  ChevronRight,
-  TrendingUp,
-  Target,
   Flame,
-  Award,
   ArrowRight,
   UserCheck,
+  Download,
+  Play,
+  TrendingUp,
+  Target,
+  Smartphone,
+  ChevronDown,
+  Trash2,
 } from 'lucide-react';
 
 export function InstagramIcon({ className = 'w-5 h-5' }: { className?: string }) {
@@ -59,6 +61,20 @@ interface InstagramAccount {
   preferred_post_time: string;
   auto_generate_daily: boolean;
   is_active: boolean;
+  instagram_business_id?: string;
+  access_token?: string;
+}
+
+interface ReelBeat {
+  time: string;
+  visual: string;
+  speech: string;
+}
+
+interface CarouselSlide {
+  slide_number: number;
+  title: string;
+  content: string;
 }
 
 interface InstagramPost {
@@ -79,6 +95,12 @@ interface InstagramPost {
     reach?: number;
     saves?: number;
     hook_score?: number;
+    reel_script?: {
+      hook_3s: string;
+      beat_sheet: ReelBeat[];
+      on_screen_text: string[];
+    };
+    carousel_slides?: CarouselSlide[];
   };
 }
 
@@ -103,7 +125,7 @@ interface ViralAnalysis {
     title: string;
     hook_3s: string;
     on_screen_text: string[];
-    beat_sheet: Array<{ time: string; visual: string; speech: string }>;
+    beat_sheet: ReelBeat[];
     caption: string;
     cta: string;
     virality_score: number;
@@ -122,77 +144,53 @@ interface ProfileAudit {
 
 export default function InstagramAgentManager() {
   const [loading, setLoading] = useState(true);
-  const [hasAccess, setHasAccess] = useState(false);
+  const [hasAccess, setHasAccess] = useState(true);
   const [account, setAccount] = useState<InstagramAccount | null>(null);
   const [posts, setPosts] = useState<InstagramPost[]>([]);
-  const [activeTab, setActiveTab] = useState<'overview' | 'viral' | 'create' | 'comments' | 'audit' | 'plan' | 'digest' | 'automation' | 'settings'>('overview');
+  const [selectedPost, setSelectedPost] = useState<InstagramPost | null>(null);
 
-  const [savingSettings, setSavingSettings] = useState(false);
+  // 3 Motores Principais + 1 Gaveta de Estratégia
+  const [activeTab, setActiveTab] = useState<'create' | 'viral' | 'plan' | 'settings'>('create');
+
+  // Estados de Geração
   const [generatingPost, setGeneratingPost] = useState(false);
-  const [generatingDigest, setGeneratingDigest] = useState(false);
-  const [generatingPlan, setGeneratingPlan] = useState(false);
   const [generatingViral, setGeneratingViral] = useState(false);
+  const [generatingPlan, setGeneratingPlan] = useState(false);
   const [auditingProfile, setAuditingProfile] = useState(false);
+  const [generatingComments, setGeneratingComments] = useState(false);
+  const [publishingId, setPublishingId] = useState<string | null>(null);
 
+  // Inputs
   const [topicHint, setTopicHint] = useState('');
   const [postFormat, setPostFormat] = useState<'single_image' | 'reel_script' | 'carousel'>('single_image');
+  const [viralReferenceInput, setViralReferenceInput] = useState('');
+  const [viralResult, setViralResult] = useState<ViralAnalysis | null>(null);
+  const [currentBioInput, setCurrentBioInput] = useState('');
+  const [auditResult, setAuditResult] = useState<ProfileAudit | null>(null);
+  const [competitorText, setCompetitorText] = useState('');
+  const [generatedComments, setGeneratedComments] = useState<string[]>([]);
+  const [weeklyPlan, setWeeklyPlan] = useState<WeeklyPlanItem[]>([]);
+
+  // Notificações e Cópia
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  // Meta Graph API Connection states
+  // Conexão Meta Graph API
   const [metaBusinessId, setMetaBusinessId] = useState('');
   const [metaAccessToken, setMetaAccessToken] = useState('');
   const [isConnectingMeta, setIsConnectingMeta] = useState(false);
   const [isMetaConnected, setIsMetaConnected] = useState(false);
 
-  // Virality Skill states
-  const [viralReferenceInput, setViralReferenceInput] = useState('');
-  const [viralResult, setViralResult] = useState<ViralAnalysis | null>(null);
-
-  // Profile Audit states
-  const [currentBioInput, setCurrentBioInput] = useState('');
-  const [auditResult, setAuditResult] = useState<ProfileAudit | null>(null);
-
-  // Social Selling comments states
-  const [competitorText, setCompetitorText] = useState('');
-  const [generatedComments, setGeneratedComments] = useState<string[]>([]);
-  const [generatingComments, setGeneratingComments] = useState(false);
-
-  // Weekly plan states
-  const [weeklyPlan, setWeeklyPlan] = useState<WeeklyPlanItem[]>([]);
-
-  // Form states
+  // Configuração
   const [formData, setFormData] = useState({
     account_name: '',
     account_username: '',
-    niche: '',
-    target_audience: '',
-    brand_voice: '',
-    visual_style: '',
-    wordsIUse: '',
-    wordsINeverSay: '',
-    offLimitsTopics: '',
+    niche: 'Comércio & Serviços',
+    target_audience: 'Clientes locais e interessados em novidades e ofertas',
+    brand_voice: 'Profissional, acolhedor e focado em benefícios práticos',
+    visual_style: 'Fotografia realista, iluminação de estúdio limpa, cores vivas e estética profissional',
     approval_mode: 'whatsapp_required' as 'whatsapp_required' | 'auto_scheduled',
-    approval_timeout_hours: 4,
-    timeout_action: 'auto_publish' as 'auto_publish' | 'skip',
-    preferred_post_time: '18:00:00',
-    auto_generate_daily: true,
   });
-
-  const formatErrorMessage = (raw: any): string => {
-    if (!raw) return 'Ocorreu um erro inesperado.';
-    if (typeof raw === 'string') {
-      try {
-        const parsed = JSON.parse(raw);
-        if (parsed.error?.message) return parsed.error.message;
-        if (parsed.error) return typeof parsed.error === 'string' ? parsed.error : JSON.stringify(parsed.error);
-      } catch {}
-      return raw;
-    }
-    if (raw.message) return raw.message;
-    if (raw.error) return typeof raw.error === 'string' ? raw.error : JSON.stringify(raw.error);
-    return JSON.stringify(raw);
-  };
 
   const loadData = async () => {
     try {
@@ -200,30 +198,21 @@ export default function InstagramAgentManager() {
       const res = await authFetch('/api/tenant/instagram/settings');
       if (res.ok) {
         const data = await res.json();
-        setHasAccess(data.hasAccess);
+        setHasAccess(data.hasAccess !== false);
         if (data.account) {
           setAccount(data.account);
           if (data.account.instagram_business_id && data.account.access_token) {
             setIsMetaConnected(true);
             setMetaBusinessId(data.account.instagram_business_id);
-          } else {
-            setIsMetaConnected(false);
           }
           setFormData({
             account_name: data.account.account_name || '',
             account_username: data.account.account_username || '',
-            niche: data.account.niche || '',
+            niche: data.account.niche || 'Comércio & Serviços',
             target_audience: data.account.target_audience || '',
             brand_voice: data.account.brand_voice || '',
             visual_style: data.account.visual_style || '',
-            wordsIUse: '',
-            wordsINeverSay: '',
-            offLimitsTopics: '',
             approval_mode: data.account.approval_mode || 'whatsapp_required',
-            approval_timeout_hours: data.account.approval_timeout_hours || 4,
-            timeout_action: data.account.timeout_action || 'auto_publish',
-            preferred_post_time: data.account.preferred_post_time || '18:00:00',
-            auto_generate_daily: data.account.auto_generate_daily ?? true,
           });
         }
       }
@@ -231,7 +220,11 @@ export default function InstagramAgentManager() {
       const postsRes = await authFetch('/api/tenant/instagram/posts');
       if (postsRes.ok) {
         const postsData = await postsRes.json();
-        setPosts(postsData.posts || []);
+        const list = postsData.posts || [];
+        setPosts(list);
+        if (list.length > 0 && !selectedPost) {
+          setSelectedPost(list[0]);
+        }
       }
     } catch (err: any) {
       console.error('Erro ao carregar dados do Instagram:', err);
@@ -244,84 +237,49 @@ export default function InstagramAgentManager() {
     loadData();
   }, []);
 
-  const handleActivateAddon = async () => {
-    try {
-      setLoading(true);
-      const res = await authFetch('/api/tenant/instagram/addon', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'activate' }),
-      });
-      if (res.ok) {
-        setFeedbackMsg({ type: 'success', text: 'Módulo Instagram ativado com sucesso!' });
-        loadData();
-      } else {
-        const err = await res.json();
-        setFeedbackMsg({ type: 'error', text: formatErrorMessage(err) });
-      }
-    } catch (err) {
-      setFeedbackMsg({ type: 'error', text: 'Erro de conexão.' });
-    } finally {
-      setLoading(false);
-    }
+  const copyToClipboard = (text: string, key: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2500);
   };
 
-  const handleTogglePilot = async (newMode: 'whatsapp_required' | 'auto_scheduled') => {
-    const updatedForm = { ...formData, approval_mode: newMode };
-    setFormData(updatedForm);
+  const handleGeneratePost = async () => {
     try {
-      const res = await authFetch('/api/tenant/instagram/settings', {
+      setGeneratingPost(true);
+      setFeedbackMsg(null);
+      const res = await authFetch('/api/tenant/instagram/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedForm),
+        body: JSON.stringify({ topicHint, format: postFormat }),
       });
       if (res.ok) {
         const data = await res.json();
-        setAccount(data.account);
+        setPosts((prev) => [data.post, ...prev]);
+        setSelectedPost(data.post);
+        setTopicHint('');
         setFeedbackMsg({
           type: 'success',
-          text:
-            newMode === 'auto_scheduled'
-              ? '🚀 Piloto Automático ATIVADO! A IA gerencia suas postagens e tarefas de forma 100% autônoma.'
-              : '📲 Modo Aprovação via WhatsApp ATIVADO! O agente enviará cada post para você aprovar antes de publicar.',
+          text: `Publicação gerada com sucesso pela IA! Gancho com nota ${data.details?.hook_score || 94}/100.`,
         });
-      }
-    } catch {
-      setFeedbackMsg({ type: 'error', text: 'Erro ao alternar modo de autonomia.' });
-    }
-  };
-
-  const handleSaveSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      setSavingSettings(true);
-      const res = await authFetch('/api/tenant/instagram/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setAccount(data.account);
-        setFeedbackMsg({ type: 'success', text: 'Configurações do perfil salvas com sucesso!' });
       } else {
         const err = await res.json();
-        setFeedbackMsg({ type: 'error', text: formatErrorMessage(err) });
+        setFeedbackMsg({ type: 'error', text: err.error || 'Falha ao gerar post com a IA.' });
       }
     } catch {
-      setFeedbackMsg({ type: 'error', text: 'Erro ao conectar ao servidor.' });
+      setFeedbackMsg({ type: 'error', text: 'Erro de conexão ao gerar o post.' });
     } finally {
-      setSavingSettings(false);
+      setGeneratingPost(false);
     }
   };
 
-  const handleGenerateViralAnalysis = async () => {
+  const handleGenerateViral = async () => {
     if (!viralReferenceInput.trim()) {
-      setFeedbackMsg({ type: 'error', text: 'Informe um tema, gancho ou texto de vídeo viral de referência.' });
+      setFeedbackMsg({ type: 'error', text: 'Informe um tema, gancho ou link de referência viral.' });
       return;
     }
     try {
       setGeneratingViral(true);
+      setFeedbackMsg(null);
       const res = await authFetch('/api/tenant/instagram/viral', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -330,21 +288,42 @@ export default function InstagramAgentManager() {
       if (res.ok) {
         const data = await res.json();
         setViralResult(data.analysis);
-        setFeedbackMsg({ type: 'success', text: 'Raio-X de Viralidade e novo roteiro gerados com sucesso!' });
+        setFeedbackMsg({ type: 'success', text: 'Raio-X concluído! Roteiro viral inédito gerado.' });
       } else {
         const err = await res.json();
-        setFeedbackMsg({ type: 'error', text: formatErrorMessage(err) });
+        setFeedbackMsg({ type: 'error', text: err.error || 'Erro ao analisar referência viral.' });
       }
     } catch {
-      setFeedbackMsg({ type: 'error', text: 'Erro de comunicação com o motor de viralidade.' });
+      setFeedbackMsg({ type: 'error', text: 'Erro ao conectar à IA para dissecação viral.' });
     } finally {
       setGeneratingViral(false);
+    }
+  };
+
+  const handleGeneratePlan = async () => {
+    try {
+      setGeneratingPlan(true);
+      setFeedbackMsg(null);
+      const res = await authFetch('/api/tenant/instagram/plan', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        setWeeklyPlan(data.plan || []);
+        setFeedbackMsg({ type: 'success', text: 'Grade de 7 dias criada nos 4 pilares estratégicos!' });
+      } else {
+        const err = await res.json();
+        setFeedbackMsg({ type: 'error', text: err.error || 'Erro ao gerar planejamento semanal.' });
+      }
+    } catch {
+      setFeedbackMsg({ type: 'error', text: 'Erro ao gerar planejamento semanal.' });
+    } finally {
+      setGeneratingPlan(false);
     }
   };
 
   const handleAuditProfile = async () => {
     try {
       setAuditingProfile(true);
+      setFeedbackMsg(null);
       const res = await authFetch('/api/tenant/instagram/audit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -353,22 +332,106 @@ export default function InstagramAgentManager() {
       if (res.ok) {
         const data = await res.json();
         setAuditResult(data.audit);
-        setFeedbackMsg({ type: 'success', text: `Auditoria concluída! Nota do seu perfil: ${data.audit.score}/100` });
+        setFeedbackMsg({ type: 'success', text: `Diagnóstico pronto! Nota do perfil: ${data.audit.score}/100.` });
       } else {
         const err = await res.json();
-        setFeedbackMsg({ type: 'error', text: formatErrorMessage(err) });
+        setFeedbackMsg({ type: 'error', text: err.error || 'Erro ao auditar perfil.' });
       }
     } catch {
-      setFeedbackMsg({ type: 'error', text: 'Erro ao auditar perfil.' });
+      setFeedbackMsg({ type: 'error', text: 'Erro ao conectar com a IA.' });
     } finally {
       setAuditingProfile(false);
+    }
+  };
+
+  const handleGenerateComments = async () => {
+    if (!competitorText.trim()) return;
+    try {
+      setGeneratingComments(true);
+      setFeedbackMsg(null);
+      const res = await authFetch('/api/tenant/instagram/comments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ competitorPostText: competitorText }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setGeneratedComments(data.comments || []);
+        setFeedbackMsg({ type: 'success', text: '3 opções de comentários magnéticos geradas!' });
+      } else {
+        const err = await res.json();
+        setFeedbackMsg({ type: 'error', text: err.error || 'Erro ao gerar comentários.' });
+      }
+    } catch {
+      setFeedbackMsg({ type: 'error', text: 'Erro de conexão.' });
+    } finally {
+      setGeneratingComments(false);
+    }
+  };
+
+  const handlePublishPost = async (postId: string) => {
+    try {
+      setPublishingId(postId);
+      setFeedbackMsg(null);
+      const res = await authFetch('/api/tenant/instagram/posts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'publish', postId }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setFeedbackMsg({ type: 'success', text: 'Publicação enviada com sucesso para o Instagram!' });
+        loadData();
+      } else {
+        setFeedbackMsg({ type: 'error', text: data.error || 'Falha ao publicar via Meta API.' });
+      }
+    } catch {
+      setFeedbackMsg({ type: 'error', text: 'Erro ao publicar na Meta.' });
+    } finally {
+      setPublishingId(null);
+    }
+  };
+
+  const handleDeletePost = async (postId: string) => {
+    if (!confirm('Deseja excluir este post gerado?')) return;
+    try {
+      const res = await authFetch(`/api/tenant/instagram/posts?id=${postId}`, { method: 'DELETE' });
+      if (res.ok) {
+        setPosts((prev) => prev.filter((p) => p.id !== postId));
+        if (selectedPost?.id === postId) {
+          setSelectedPost(null);
+        }
+      }
+    } catch {
+      setFeedbackMsg({ type: 'error', text: 'Erro ao remover post.' });
+    }
+  };
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setLoading(true);
+      const res = await authFetch('/api/tenant/instagram/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData),
+      });
+      if (res.ok) {
+        setFeedbackMsg({ type: 'success', text: 'Configurações de marca salvas com sucesso!' });
+        loadData();
+      } else {
+        const err = await res.json();
+        setFeedbackMsg({ type: 'error', text: err.error || 'Erro ao salvar configurações.' });
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleConnectMeta = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!metaBusinessId.trim() || !metaAccessToken.trim()) {
-      setFeedbackMsg({ type: 'error', text: 'Preencha o Instagram Business ID e o Access Token da Meta.' });
+      setFeedbackMsg({ type: 'error', text: 'Informe o Instagram Business ID e o Access Token.' });
       return;
     }
     try {
@@ -384,14 +447,12 @@ export default function InstagramAgentManager() {
         setAccount(data.account);
         setFeedbackMsg({
           type: 'success',
-          text: `Conta Oficial da Meta conectada com sucesso! (@${data.username || metaBusinessId}) - Publicação direta ativada.`,
+          text: `Meta Graph API conectada com sucesso (@${data.username || metaBusinessId})! Publicação direta liberada.`,
         });
       } else {
         const err = await res.json();
-        setFeedbackMsg({ type: 'error', text: formatErrorMessage(err) });
+        setFeedbackMsg({ type: 'error', text: err.error || 'Erro ao autenticar com a Meta.' });
       }
-    } catch {
-      setFeedbackMsg({ type: 'error', text: 'Erro ao validar conexão com a Meta.' });
     } finally {
       setIsConnectingMeta(false);
     }
@@ -400,1194 +461,1017 @@ export default function InstagramAgentManager() {
   const handleDisconnectMeta = async () => {
     try {
       setIsConnectingMeta(true);
-      const res = await authFetch('/api/tenant/instagram/connect', {
+      await authFetch('/api/tenant/instagram/connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'disconnect' }),
       });
-      if (res.ok) {
-        setIsMetaConnected(false);
-        setMetaAccessToken('');
-        setFeedbackMsg({
-          type: 'success',
-          text: 'Conta da Meta desconectada. O agente continuará operando no Modo Copiloto / WhatsApp.',
-        });
-      }
+      setIsMetaConnected(false);
+      setMetaAccessToken('');
+      setFeedbackMsg({ type: 'success', text: 'Conexão com a Meta removida com sucesso.' });
     } finally {
       setIsConnectingMeta(false);
     }
   };
 
-  const handleGeneratePost = async () => {
-    try {
-      setGeneratingPost(true);
-      const res = await authFetch('/api/tenant/instagram/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topicHint, format: postFormat }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setPosts((prev) => [data.post, ...prev]);
-        setTopicHint('');
-        setFeedbackMsg({
-          type: 'success',
-          text: `Publicação gerada com sucesso pela IA! (Gancho: ${data.details?.hook_score || 94}/100)`,
-        });
-      } else {
-        const err = await res.json();
-        setFeedbackMsg({ type: 'error', text: formatErrorMessage(err) });
-      }
-    } catch {
-      setFeedbackMsg({ type: 'error', text: 'Erro ao comunicar com a IA.' });
-    } finally {
-      setGeneratingPost(false);
-    }
-  };
-
-  const handleGenerateComments = async () => {
-    if (!competitorText.trim()) return;
-    try {
-      setGeneratingComments(true);
-      const res = await authFetch('/api/tenant/instagram/comments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ competitorPostText: competitorText }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setGeneratedComments(data.comments || []);
-        setFeedbackMsg({ type: 'success', text: '3 comentários magnéticos gerados!' });
-      } else {
-        const err = await res.json();
-        setFeedbackMsg({ type: 'error', text: formatErrorMessage(err) });
-      }
-    } catch {
-      setFeedbackMsg({ type: 'error', text: 'Erro ao gerar comentários de engajamento.' });
-    } finally {
-      setGeneratingComments(false);
-    }
-  };
-
-  const handleGeneratePlan = async () => {
-    try {
-      setGeneratingPlan(true);
-      const res = await authFetch('/api/tenant/instagram/plan', { method: 'POST' });
-      if (res.ok) {
-        const data = await res.json();
-        setWeeklyPlan(data.plan || []);
-        setFeedbackMsg({ type: 'success', text: 'Plano semanal de 7 dias gerado com sucesso nos 4 pilares!' });
-      } else {
-        const err = await res.json();
-        setFeedbackMsg({ type: 'error', text: formatErrorMessage(err) });
-      }
-    } catch {
-      setFeedbackMsg({ type: 'error', text: 'Erro ao gerar planejamento semanal.' });
-    } finally {
-      setGeneratingPlan(false);
-    }
-  };
-
-  const handleGenerateDigest = async () => {
-    try {
-      setGeneratingDigest(true);
-      const res = await authFetch('/api/tenant/instagram/digest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          niche: formData.niche,
-          target_audience: formData.target_audience,
-          brand_voice: formData.brand_voice,
-          visual_style: formData.visual_style,
-          wordsIUse: formData.wordsIUse,
-          wordsINeverSay: formData.wordsINeverSay,
-          offLimitsTopics: formData.offLimitsTopics,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setAccount((prev) => (prev ? { ...prev, brand_knowledge_digest: data.digest, digest_updated_at: data.updated_at } : null));
-        setFeedbackMsg({
-          type: 'success',
-          text: 'Guia de Voz e Knowledge Digest sintetizados com sucesso! Economia de mais de 90% em tokens.',
-        });
-      } else {
-        const err = await res.json();
-        setFeedbackMsg({ type: 'error', text: formatErrorMessage(err) });
-      }
-    } catch {
-      setFeedbackMsg({ type: 'error', text: 'Erro ao comunicar com a IA.' });
-    } finally {
-      setGeneratingDigest(false);
-    }
-  };
-
-  const copyToClipboard = (text: string, key: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedKey(key);
-    setTimeout(() => setCopiedKey(null), 2000);
-  };
-
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center p-12 text-slate-400">
-        <RefreshCw className="w-8 h-8 animate-spin mb-3 text-indigo-500" />
-        <p className="text-sm">Carregando Agente de Instagram...</p>
-      </div>
-    );
-  }
-
-  // TELA DE CONTRATAÇÃO
-  if (!hasAccess) {
-    return (
-      <div className="max-w-4xl mx-auto space-y-6 p-4 sm:p-6 overflow-hidden">
-        <div className="bg-gradient-to-br from-slate-900 via-indigo-950/40 to-slate-900 border border-indigo-500/30 rounded-2xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
-          <div className="relative z-10 space-y-6">
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-pink-500/20 border border-pink-500/30 text-pink-300 text-xs font-semibold tracking-wide uppercase">
-              <Sparkles className="w-3.5 h-3.5" /> Módulo Adicional Comercial
-            </div>
-
-            <div className="space-y-2">
-              <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight flex items-center gap-3">
-                <span className="p-2.5 rounded-xl bg-gradient-to-tr from-pink-500 to-indigo-600 text-white shadow-lg shrink-0">
-                  <InstagramIcon className="w-6 h-6 sm:w-7 sm:h-7" />
-                </span>
-                Agente Autônomo de Instagram com IA
-              </h1>
-              <p className="text-slate-300 text-sm sm:text-base max-w-2xl leading-relaxed">
-                As 11 habilidades do <code>instagram-agent-skill</code> no ERBots: Virality Skill, 21 Ganchos Virais, Social Selling, Otimização de Perfil e Planejamento no Piloto Automático.
-              </p>
-            </div>
-
-            <div className="pt-6 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div>
-                <span className="text-xs uppercase text-slate-400 font-medium">Investimento</span>
-                <div className="flex items-baseline gap-1">
-                  <span className="text-3xl font-black text-white">R$ 97</span>
-                  <span className="text-slate-400 text-sm">/mês</span>
-                </div>
-              </div>
-
-              <button
-                onClick={handleActivateAddon}
-                className="w-full sm:w-auto px-8 py-3.5 rounded-xl font-bold text-white bg-gradient-to-r from-pink-500 via-purple-600 to-indigo-600 hover:from-pink-600 hover:to-indigo-700 shadow-lg shadow-pink-500/25 transition-all flex items-center justify-center gap-2"
-              >
-                <Zap className="w-4 h-4" /> Ativar Módulo Instagram Agora
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const isPilotActive = formData.approval_mode === 'auto_scheduled';
-  const cleanUsername = (formData.account_username || 'seu_perfil').replace(/^@+/, '');
-
   return (
-    <div className="max-w-6xl mx-auto space-y-5 p-3 sm:p-6 overflow-x-hidden">
-      {/* Banner de Feedback Limpo */}
+    <div className="space-y-6">
+      {/* Banner de Feedback Global */}
       {feedbackMsg && (
         <div
-          className={`p-3.5 sm:p-4 rounded-xl text-xs sm:text-sm flex items-start sm:items-center justify-between gap-3 border transition-all ${
+          className={`p-4 rounded-2xl flex items-center justify-between gap-3 text-xs sm:text-sm font-medium border animate-in fade-in duration-200 ${
             feedbackMsg.type === 'success'
               ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
               : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
           }`}
         >
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-2">
             {feedbackMsg.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
             ) : (
-              <AlertCircle className="w-4 h-4 shrink-0" />
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
             )}
-            <span className="break-words leading-relaxed">{feedbackMsg.text}</span>
+            <span>{feedbackMsg.text}</span>
           </div>
-          <button onClick={() => setFeedbackMsg(null)} className="p-1 hover:opacity-75 shrink-0">
+          <button onClick={() => setFeedbackMsg(null)} className="p-1 hover:text-white transition">
             <X className="w-4 h-4" />
           </button>
         </div>
       )}
 
-      {/* HEADER PRINCIPAL: PERFIL & PILOTO AUTOMÁTICO */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-lg">
-        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-          {/* Identificação da Conta */}
-          <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-amber-500 via-pink-500 to-indigo-600 p-0.5 shrink-0 shadow-md">
-              <div className="w-full h-full rounded-[10px] bg-slate-950 flex items-center justify-center text-white font-extrabold text-base">
-                {cleanUsername.slice(0, 2).toUpperCase()}
-              </div>
+      {/* Cabeçalho Executivo com Indicadores */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-pink-500 to-rose-500 flex items-center justify-center text-white shadow-lg shadow-pink-500/20 shrink-0">
+              <InstagramIcon className="w-5 h-5 text-white" />
             </div>
-
             <div>
-              <div className="flex items-center gap-2">
-                <span className="text-base font-bold text-white">@{cleanUsername}</span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium">
-                  Ativo
+              <h2 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2 tracking-tight">
+                Agente Autônomo de Instagram
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-pink-500/15 text-pink-300 border border-pink-500/30">
+                  Motor de Atração &amp; Conteúdo
                 </span>
-              </div>
-              <p className="text-xs text-slate-400">
-                {formData.account_name || 'Sua Empresa'} • Nicho: <strong className="text-slate-200">{formData.niche || 'Geral'}</strong>
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+                Crie posts magnéticos com IA, disseque conteúdos virais e atraia clientes para o seu WhatsApp.
               </p>
             </div>
           </div>
+        </div>
 
-          {/* As 4 Tarefas Executadas */}
-          <div className="flex flex-wrap items-center gap-1.5 w-full lg:w-auto">
-            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mr-1 hidden sm:inline">
-              Tarefas:
-            </span>
-            <span className="px-2.5 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[11px] font-medium flex items-center gap-1">
-              <Check className="w-3 h-3 text-emerald-400" /> Postar
-            </span>
-            <span className="px-2.5 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[11px] font-medium flex items-center gap-1">
-              <Check className="w-3 h-3 text-emerald-400" /> Comentar
-            </span>
-            <span className="px-2.5 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[11px] font-medium flex items-center gap-1">
-              <Check className="w-3 h-3 text-emerald-400" /> Responder
-            </span>
-            <span className="px-2.5 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[11px] font-medium flex items-center gap-1">
-              <Check className="w-3 h-3 text-emerald-400" /> Planejar
-            </span>
-          </div>
-
-          {/* Switch do Piloto Automático */}
-          <div className="flex items-center justify-between lg:justify-end gap-3 w-full lg:w-auto pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-800">
-            <div className="text-left lg:text-right">
-              <span className="block text-xs font-bold text-white uppercase tracking-wider">
-                Piloto Automático
-              </span>
-              <span className="text-[11px] text-slate-400">
-                {isPilotActive ? 'Execução 100% autônoma' : 'Requer aprovação WhatsApp'}
-              </span>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => handleTogglePilot(isPilotActive ? 'whatsapp_required' : 'auto_scheduled')}
-              className={`w-13 h-7.5 rounded-full transition-colors relative p-1 shrink-0 ${
-                isPilotActive
-                  ? 'bg-gradient-to-r from-orange-500 to-pink-600 shadow-md'
-                  : 'bg-slate-800 border border-slate-700'
-              }`}
-            >
-              <div
-                className={`w-5.5 h-5.5 rounded-full bg-white transition-transform shadow ${
-                  isPilotActive ? 'translate-x-5.5' : 'translate-x-0'
-                }`}
-              />
-            </button>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300">
+            <span
+              className={`w-2 h-2 rounded-full ${isMetaConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}
+            />
+            <span>{isMetaConnected ? 'Meta API Ativa' : 'Modo Copiloto (Pronto para Uso)'}</span>
           </div>
         </div>
       </div>
 
-      {/* NAVEGAÇÃO ENTRE AS HABILIDADES (100% RESPONSIVA, ZERO QUEBRA NO MOBILE) */}
-      <div className="flex items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden py-1 border-b border-slate-800">
+      {/* Cards de Métricas e Ciclo de Atração */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between">
+          <div>
+            <span className="text-xs text-slate-400 block font-medium">Publicações Criadas</span>
+            <div className="text-2xl font-extrabold text-white mt-1">{posts.length} posts</div>
+            <span className="text-[11px] text-emerald-400 mt-0.5 block">Prontas para copiar ou publicar</span>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+            <Sparkles className="w-5 h-5" />
+          </div>
+        </div>
+
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between">
+          <div>
+            <span className="text-xs text-slate-400 block font-medium">Ciclo de Conversão</span>
+            <div className="text-2xl font-extrabold text-white mt-1">Instagram ➔ Zap</div>
+            <span className="text-[11px] text-sky-400 mt-0.5 block">CTAs automáticos para o ERBots</span>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 shrink-0">
+            <MessageSquare className="w-5 h-5" />
+          </div>
+        </div>
+
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between">
+          <div>
+            <span className="text-xs text-slate-400 block font-medium">Qualidade de Gancho</span>
+            <div className="text-2xl font-extrabold text-white mt-1">94% Score</div>
+            <span className="text-[11px] text-purple-400 mt-0.5 block">Filtro anti-clichês de IA ativo</span>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 shrink-0">
+            <Flame className="w-5 h-5" />
+          </div>
+        </div>
+      </div>
+
+      {/* Navegação por Abas (Estilo Executivo Painel Master) */}
+      <div className="flex border-b border-slate-800 space-x-6 sm:space-x-8 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
         <button
-          onClick={() => setActiveTab('overview')}
-          className={`px-3 py-2 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition shrink-0 whitespace-nowrap ${
-            activeTab === 'overview' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+          onClick={() => setActiveTab('create')}
+          className={`pb-4 text-sm font-semibold flex items-center gap-2 border-b-2 transition whitespace-nowrap shrink-0 ${
+            activeTab === 'create'
+              ? 'border-emerald-400 text-emerald-400'
+              : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
-          <Sliders className="w-3.5 h-3.5" /> Visão Geral
+          <Sparkles className="w-4 h-4" />
+          <span>Fábrica de Posts &amp; Imagens</span>
         </button>
 
         <button
           onClick={() => setActiveTab('viral')}
-          className={`px-3 py-2 text-xs font-bold rounded-lg flex items-center gap-1.5 transition shrink-0 whitespace-nowrap ${
-            activeTab === 'viral' ? 'bg-pink-600 text-white shadow' : 'text-pink-400 hover:text-white hover:bg-slate-800'
+          className={`pb-4 text-sm font-semibold flex items-center gap-2 border-b-2 transition whitespace-nowrap shrink-0 ${
+            activeTab === 'viral'
+              ? 'border-emerald-400 text-emerald-400'
+              : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
-          <Flame className="w-3.5 h-3.5 text-pink-400" /> Virality Skill (/ig-viral)
-        </button>
-
-        <button
-          onClick={() => setActiveTab('create')}
-          className={`px-3 py-2 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition shrink-0 whitespace-nowrap ${
-            activeTab === 'create' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'
-          }`}
-        >
-          <Sparkles className="w-3.5 h-3.5 text-indigo-400" /> Criar Conteúdo (21 Ganchos)
-        </button>
-
-        <button
-          onClick={() => setActiveTab('comments')}
-          className={`px-3 py-2 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition shrink-0 whitespace-nowrap ${
-            activeTab === 'comments' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'
-          }`}
-        >
-          <MessageCircle className="w-3.5 h-3.5 text-emerald-400" /> Social Selling (Comentar)
-        </button>
-
-        <button
-          onClick={() => setActiveTab('audit')}
-          className={`px-3 py-2 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition shrink-0 whitespace-nowrap ${
-            activeTab === 'audit' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'
-          }`}
-        >
-          <Target className="w-3.5 h-3.5 text-cyan-400" /> Otimizar Perfil (/ig-profile)
+          <Flame className="w-4 h-4 text-amber-400" />
+          <span>Laboratório Viral (/ig-viral)</span>
         </button>
 
         <button
           onClick={() => setActiveTab('plan')}
-          className={`px-3 py-2 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition shrink-0 whitespace-nowrap ${
-            activeTab === 'plan' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+          className={`pb-4 text-sm font-semibold flex items-center gap-2 border-b-2 transition whitespace-nowrap shrink-0 ${
+            activeTab === 'plan'
+              ? 'border-emerald-400 text-emerald-400'
+              : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
-          <Calendar className="w-3.5 h-3.5 text-amber-400" /> Planejador Semanal
-        </button>
-
-        <button
-          onClick={() => setActiveTab('digest')}
-          className={`px-3 py-2 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition shrink-0 whitespace-nowrap ${
-            activeTab === 'digest' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'
-          }`}
-        >
-          <Zap className="w-3.5 h-3.5 text-amber-300" /> Guia de Voz & Tokens
-        </button>
-
-        <button
-          onClick={() => setActiveTab('automation')}
-          className={`px-3 py-2 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition shrink-0 whitespace-nowrap ${
-            activeTab === 'automation' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'
-          }`}
-        >
-          <MessageSquare className="w-3.5 h-3.5 text-teal-400" /> Direct &quot;Comente X&quot;
+          <Calendar className="w-4 h-4" />
+          <span>Planejador Semanal</span>
         </button>
 
         <button
           onClick={() => setActiveTab('settings')}
-          className={`px-3 py-2 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition shrink-0 whitespace-nowrap ${
-            activeTab === 'settings' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+          className={`pb-4 text-sm font-semibold flex items-center gap-2 border-b-2 transition whitespace-nowrap shrink-0 ${
+            activeTab === 'settings'
+              ? 'border-emerald-400 text-emerald-400'
+              : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
-          <Clock className="w-3.5 h-3.5 text-slate-300" /> Horários
+          <Sliders className="w-4 h-4" />
+          <span>Estratégia &amp; Conexão</span>
         </button>
       </div>
 
-      {/* ABA 1: VISÃO GERAL */}
-      {activeTab === 'overview' && (
-        <div className="space-y-5">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
-              <span className="text-xs text-slate-400">Total de Posts Criados</span>
-              <p className="text-2xl font-bold text-white">{posts.length}</p>
+      {/* =========================================================================
+          ABA 1: FÁBRICA DE POSTS & IMAGENS COM IA
+      ========================================================================== */}
+      {activeTab === 'create' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Lado Esquerdo: Formulário de Criação Rápida */}
+          <div className="lg:col-span-5 space-y-5">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-emerald-400" />
+                  Criar Publicação Magnética
+                </h3>
+                <span className="text-[11px] text-slate-400">Gemini 3.8 + Imagen 3</span>
+              </div>
+
+              {/* Seletor de Formato */}
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-2">Formato do Conteúdo</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPostFormat('single_image')}
+                    className={`p-3 rounded-xl border flex flex-col items-center gap-1.5 transition text-center ${
+                      postFormat === 'single_image'
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800/60'
+                    }`}
+                  >
+                    <ImageIcon className="w-4 h-4" />
+                    <span className="text-xs">Post com Foto</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPostFormat('reel_script')}
+                    className={`p-3 rounded-xl border flex flex-col items-center gap-1.5 transition text-center ${
+                      postFormat === 'reel_script'
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800/60'
+                    }`}
+                  >
+                    <Film className="w-4 h-4" />
+                    <span className="text-xs">Roteiro Reels</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPostFormat('carousel')}
+                    className={`p-3 rounded-xl border flex flex-col items-center gap-1.5 transition text-center ${
+                      postFormat === 'carousel'
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800/60'
+                    }`}
+                  >
+                    <Layers className="w-4 h-4" />
+                    <span className="text-xs">Carrossel</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Campo de Tema / Ideia */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-semibold text-slate-300">Tema ou Oferta do Post (Opcional)</label>
+                  <span className="text-[11px] text-slate-500">Em branco = IA escolhe o melhor</span>
+                </div>
+                <textarea
+                  rows={3}
+                  value={topicHint}
+                  onChange={(e) => setTopicHint(e.target.value)}
+                  placeholder="Ex: Quebrando o mito sobre preços, promoção especial de quinta-feira, ou dica prática para clientes..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition resize-none"
+                />
+              </div>
+
+              {/* Botão de Disparo */}
+              <button
+                type="button"
+                onClick={handleGeneratePost}
+                disabled={generatingPost}
+                className="w-full py-3 px-4 rounded-xl font-bold text-sm bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 disabled:opacity-50"
+              >
+                <Sparkles className={`w-4 h-4 ${generatingPost ? 'animate-spin' : ''}`} />
+                <span>{generatingPost ? 'Criando Arte & Legenda Magnética...' : 'Gerar Publicação com 1 Clique'}</span>
+              </button>
             </div>
-            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
-              <span className="text-xs text-slate-400">Aguardando Aprovação</span>
-              <p className="text-2xl font-bold text-amber-400">
-                {posts.filter((p) => p.status === 'pending_approval').length}
-              </p>
-            </div>
-            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
-              <span className="text-xs text-slate-400">Publicados / Agendados</span>
-              <p className="text-2xl font-bold text-emerald-400">
-                {posts.filter((p) => p.status === 'published' || p.status === 'scheduled').length}
-              </p>
+
+            {/* Lista Rápida dos Últimos Posts Gerados */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg space-y-3">
+              <span className="text-xs font-bold text-slate-300 block">Histórico de Publicações ({posts.length})</span>
+              <div className="max-h-[340px] overflow-y-auto space-y-2 [scrollbar-width:thin]">
+                {posts.length === 0 ? (
+                  <p className="text-xs text-slate-500 text-center py-4">Nenhum post gerado ainda. Clique no botão acima!</p>
+                ) : (
+                  posts.map((p) => (
+                    <div
+                      key={p.id}
+                      onClick={() => setSelectedPost(p)}
+                      className={`p-3 rounded-xl border cursor-pointer transition flex items-center justify-between gap-3 ${
+                        selectedPost?.id === p.id
+                          ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-200'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-850'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center shrink-0">
+                          {p.post_type === 'reel_script' && <Film className="w-4 h-4 text-rose-400" />}
+                          {p.post_type === 'carousel' && <Layers className="w-4 h-4 text-sky-400" />}
+                          {p.post_type === 'single_image' && <ImageIcon className="w-4 h-4 text-emerald-400" />}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-white truncate">{p.hook_title}</p>
+                          <span className="text-[10px] text-slate-500">
+                            {new Date(p.created_at).toLocaleDateString('pt-BR')} • {p.post_type}
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeletePost(p.id);
+                        }}
+                        className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-slate-800 transition"
+                        title="Excluir post"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
 
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-3 flex flex-col justify-between">
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2 text-pink-400 font-bold text-sm">
-                  <Flame className="w-4 h-4" /> Virality Skill (/ig-viral)
+          {/* Lado Direito: Simulador de Feed do Instagram em Tempo Real */}
+          <div className="lg:col-span-7">
+            {selectedPost ? (
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <Smartphone className="w-4 h-4 text-emerald-400" />
+                    <span className="text-sm font-bold text-white">Preview em Tempo Real (Estilo Instagram)</span>
+                  </div>
+                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
+                    Gancho: {selectedPost.metrics?.hook_score || 94}/100
+                  </span>
                 </div>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  A função estrela do vídeo: Raio-X dos vídeos virais do seu nicho e geração de roteiros virais inéditos.
-                </p>
-              </div>
-              <button
-                onClick={() => setActiveTab('viral')}
-                className="w-full py-2 text-xs font-bold text-white bg-pink-600 hover:bg-pink-500 rounded-lg transition flex items-center justify-center gap-1.5"
-              >
-                Abrir Virality Skill <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
 
-            <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-3 flex flex-col justify-between">
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2 text-indigo-400 font-bold text-sm">
-                  <Sparkles className="w-4 h-4" /> 21 Ganchos Virais
-                </div>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Crie posts para Feed, Reels e Carrossel usando ganchos comprovados e fotos em estúdio geradas por IA.
-                </p>
-              </div>
-              <button
-                onClick={() => setActiveTab('create')}
-                className="w-full py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition flex items-center justify-center gap-1.5"
-              >
-                Criar Publicação <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
+                {/* Card de Visualização do Instagram */}
+                <div className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden max-w-md mx-auto shadow-xl">
+                  {/* Cabeçalho do Perfil no Mockup */}
+                  <div className="p-3 border-b border-slate-850 flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-pink-500 to-amber-400 flex items-center justify-center p-0.5">
+                        <div className="w-full h-full bg-slate-950 rounded-full flex items-center justify-center font-bold text-xs text-white">
+                          {account?.account_name?.slice(0, 1) || 'E'}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold text-white block">
+                          @{account?.account_username || 'sua_empresa'}
+                        </span>
+                        <span className="text-[10px] text-slate-400 block">{account?.niche || 'Negócio Local'}</span>
+                      </div>
+                    </div>
+                    <span className="text-xs text-slate-500">•••</span>
+                  </div>
 
-            <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-3 flex flex-col justify-between">
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
-                  <MessageCircle className="w-4 h-4" /> Social Selling (DE OUTRAS)
+                  {/* Imagem ou Roteiro Visual */}
+                  {selectedPost.media_urls?.[0] ? (
+                    <div className="relative aspect-square w-full bg-slate-900 overflow-hidden flex items-center justify-center">
+                      <img
+                        src={selectedPost.media_urls[0]}
+                        alt={selectedPost.hook_title}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  ) : (
+                    <div className="aspect-video w-full bg-slate-900/60 p-4 flex flex-col justify-center items-center text-center gap-2 border-y border-slate-800">
+                      <Film className="w-8 h-8 text-rose-400" />
+                      <span className="text-xs font-bold text-white">{selectedPost.hook_title}</span>
+                      <span className="text-[11px] text-slate-400">Roteiro de vídeo para gravação rápida</span>
+                    </div>
+                  )}
+
+                  {/* Detalhes do Roteiro de Reels (se houver) */}
+                  {selectedPost.post_type === 'reel_script' && selectedPost.metrics?.reel_script && (
+                    <div className="p-4 bg-slate-900/90 border-t border-slate-800 space-y-2.5">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-rose-400">
+                        <Play className="w-3.5 h-3.5 fill-current" />
+                        <span>Roteiro de Gravação (Beat Sheet)</span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-rose-200">
+                        <strong>Gancho dos 3s:</strong> &quot;{selectedPost.metrics.reel_script.hook_3s}&quot;
+                      </div>
+                      <div className="space-y-1.5 text-xs text-slate-300">
+                        {selectedPost.metrics.reel_script.beat_sheet.map((b, i) => (
+                          <div key={i} className="p-2 rounded-lg bg-slate-950/60 border border-slate-850 flex gap-2">
+                            <span className="font-mono text-emerald-400 shrink-0">{b.time}</span>
+                            <div>
+                              <p className="text-slate-400 text-[11px]">{b.visual}</p>
+                              <p className="font-semibold text-white">&quot;{b.speech}&quot;</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Slides do Carrossel (se houver) */}
+                  {selectedPost.post_type === 'carousel' && selectedPost.metrics?.carousel_slides && (
+                    <div className="p-3 bg-slate-900 border-t border-slate-800 space-y-2">
+                      <span className="text-xs font-bold text-sky-400 block">Slides Educativos do Carrossel</span>
+                      <div className="grid grid-cols-1 gap-2">
+                        {selectedPost.metrics.carousel_slides.map((s) => (
+                          <div key={s.slide_number} className="p-2 rounded-lg bg-slate-950 border border-slate-800 text-xs">
+                            <span className="font-bold text-emerald-400">Slide {s.slide_number}: {s.title}</span>
+                            <p className="text-slate-300 text-[11px] mt-0.5">{s.content}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Legenda do Post */}
+                  <div className="p-4 space-y-2 border-t border-slate-850">
+                    <p className="text-xs text-slate-200 whitespace-pre-wrap leading-relaxed font-sans">
+                      <strong className="text-white mr-1.5">@{account?.account_username || 'sua_empresa'}</strong>
+                      {selectedPost.caption}
+                    </p>
+                    <p className="text-[11px] text-sky-400 font-mono">
+                      {selectedPost.hashtags?.join(' ')}
+                    </p>
+                  </div>
                 </div>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Gere comentários de autoridade para deixar em outros perfis e atrair visitantes qualificados.
+
+                {/* Ações Rápidas do Post: Copiar, Baixar e Publicar */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2">
+                  <button
+                    onClick={() =>
+                      copyToClipboard(
+                        `${selectedPost.caption}\n\n${selectedPost.hashtags?.join(' ')}`,
+                        `caption-${selectedPost.id}`
+                      )
+                    }
+                    className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white transition flex items-center justify-center gap-1.5"
+                  >
+                    {copiedKey === `caption-${selectedPost.id}` ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Legenda Copiada!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copiar Legenda</span>
+                      </>
+                    )}
+                  </button>
+
+                  {selectedPost.media_urls?.[0] ? (
+                    <a
+                      href={selectedPost.media_urls[0]}
+                      download={`erbots_post_${selectedPost.id}.jpg`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white transition flex items-center justify-center gap-1.5"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Baixar Imagem</span>
+                    </a>
+                  ) : (
+                    <button
+                      onClick={() => copyToClipboard(JSON.stringify(selectedPost.metrics?.reel_script || {}, null, 2), `script-${selectedPost.id}`)}
+                      className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white transition flex items-center justify-center gap-1.5"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copiar Roteiro</span>
+                    </button>
+                  )}
+
+                  {isMetaConnected ? (
+                    <button
+                      onClick={() => handlePublishPost(selectedPost.id)}
+                      disabled={publishingId === selectedPost.id}
+                      className="py-2.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition flex items-center justify-center gap-1.5 disabled:opacity-50"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>{publishingId === selectedPost.id ? 'Publicando...' : 'Publicar no Insta'}</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setActiveTab('settings')}
+                      className="py-2.5 px-3 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 text-xs font-semibold transition flex items-center justify-center gap-1.5"
+                    >
+                      <span>Ligar Meta API ⚙️</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center flex flex-col items-center justify-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                  <Smartphone className="w-6 h-6" />
+                </div>
+                <h4 className="text-base font-bold text-white">Nenhum post selecionado</h4>
+                <p className="text-xs text-slate-400 max-w-sm">
+                  Gere uma nova publicação na coluna ao lado para visualizar a prévia do post, baixar a arte e copiar a legenda.
                 </p>
               </div>
-              <button
-                onClick={() => setActiveTab('comments')}
-                className="w-full py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg transition flex items-center justify-center gap-1.5"
-              >
-                Comentar em Outros Perfis <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* ABA 2: VIRALITY SKILL (/ig-viral) - A FUNÇÃO ESTRELA DO VÍDEO! */}
+      {/* =========================================================================
+          ABA 2: LABORATÓRIO VIRAL (/ig-viral)
+      ========================================================================== */}
       {activeTab === 'viral' && (
-        <div className="space-y-5">
-          <div className="bg-slate-900 border border-pink-500/30 rounded-xl p-4 sm:p-6 space-y-4 shadow-xl">
-            <div className="space-y-1">
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-pink-500/20 text-pink-300 text-xs font-bold uppercase tracking-wider">
-                <Flame className="w-3.5 h-3.5" /> Habilidade Principal: Virality Skill
+        <div className="space-y-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Flame className="w-5 h-5 text-amber-400" />
+                  Laboratório Viral — Engenharia Reversa de Conteúdo
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+                  Cole um tema, gancho ou vídeo concorrente que viralizou. A IA fará o Raio-X completo e entregará um roteiro inédito para você gravar.
+                </p>
               </div>
-              <h3 className="text-base sm:text-lg font-bold text-white">
-                Raio-X de Viralidade & Gerador de Roteiro Viral
-              </h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Cole o tema, gancho ou transcrição de qualquer vídeo que performou bem no seu nicho. A IA analisa os motivos do sucesso (retenção, gancho e emoção) e cria um roteiro viral inédito adaptado para o seu perfil.
-              </p>
+              <span className="text-xs font-bold px-3 py-1 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/30 self-start sm:self-auto">
+                Skill /ig-viral
+              </span>
             </div>
 
             <div className="space-y-2">
-              <label className="block text-xs font-semibold text-slate-300">
-                Tema, gancho ou descrição do vídeo viral de referência:
-              </label>
+              <label className="text-xs font-semibold text-slate-300">Tema ou Ideia do Vídeo Viral de Referência</label>
               <textarea
                 rows={3}
                 value={viralReferenceInput}
                 onChange={(e) => setViralReferenceInput(e.target.value)}
-                placeholder="Ex: Vídeo de 30s mostrando o erro número 1 que pequenos negócios cometem ao precificar serviços..."
-                className="w-full px-3.5 py-2.5 text-xs sm:text-sm bg-slate-950 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-pink-500"
+                placeholder="Ex: Vídeo de um concorrente falando 'Pare de comer pão francês se você quer emagrecer', que bateu 500k visualizações..."
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 transition resize-none"
               />
             </div>
 
             <button
-              onClick={handleGenerateViralAnalysis}
+              onClick={handleGenerateViral}
               disabled={generatingViral}
-              className="w-full sm:w-auto px-6 py-2.5 text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 disabled:opacity-50 rounded-lg shadow flex items-center justify-center gap-2 transition"
+              className="py-3 px-6 rounded-xl font-bold text-sm bg-gradient-to-r from-amber-500 to-orange-400 hover:from-amber-400 hover:to-orange-300 text-slate-950 transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 disabled:opacity-50"
             >
-              {generatingViral ? (
-                <>
-                  <RefreshCw className="w-4 h-4 animate-spin" /> Fazendo Raio-X & Criando Roteiro...
-                </>
-              ) : (
-                <>
-                  <Flame className="w-4 h-4" /> Executar Virality Skill
-                </>
-              )}
+              <Flame className={`w-4 h-4 ${generatingViral ? 'animate-spin' : ''}`} />
+              <span>{generatingViral ? 'Dissecando Gancho & Criando Roteiro...' : 'Fazer Raio-X & Criar Roteiro Viral'}</span>
             </button>
           </div>
 
-          {/* Resultado da Análise Viral */}
+          {/* Resultado do Raio-X e Roteiro Inédito */}
           {viralResult && (
-            <div className="space-y-4">
-              {/* Card 1: Raio-X do Porquê Viralizou */}
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5 space-y-3">
-                <h4 className="text-xs font-bold text-pink-400 uppercase tracking-wider flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4" /> Raio-X do Vídeo Viral: Por que funcionou?
-                </h4>
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Raio-X do Gancho */}
+              <div className="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+                <div className="flex items-center gap-2 pb-3 border-b border-slate-800">
+                  <Target className="w-4 h-4 text-amber-400" />
+                  <h4 className="text-sm font-bold text-white">Raio-X: Por que o vídeo viralizou?</h4>
+                </div>
 
-                <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
-                    <span className="text-[10px] text-slate-400 uppercase font-bold">Tipo de Gancho</span>
-                    <p className="text-xs font-semibold text-white">{viralResult.hook_breakdown.hook_type}</p>
+                <div className="space-y-3 text-xs">
+                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                    <span className="font-bold text-amber-300 block mb-1">🎯 Tipo de Gancho</span>
+                    <p className="text-slate-300">{viralResult.hook_breakdown.hook_type}</p>
                   </div>
 
-                  <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
-                    <span className="text-[10px] text-slate-400 uppercase font-bold">Gatilho Emocional</span>
-                    <p className="text-xs font-semibold text-amber-300">{viralResult.hook_breakdown.emotional_trigger}</p>
+                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                    <span className="font-bold text-emerald-300 block mb-1">🧠 Psicologia do Algoritmo</span>
+                    <p className="text-slate-300 leading-relaxed">{viralResult.hook_breakdown.why_it_worked}</p>
                   </div>
 
-                  <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
-                    <span className="text-[10px] text-slate-400 uppercase font-bold">Por que Viralizou</span>
-                    <p className="text-xs text-slate-300">{viralResult.hook_breakdown.why_it_worked}</p>
+                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                    <span className="font-bold text-sky-300 block mb-1">⏱️ Fator de Retenção</span>
+                    <p className="text-slate-300 leading-relaxed">{viralResult.hook_breakdown.retention_factor}</p>
                   </div>
 
-                  <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
-                    <span className="text-[10px] text-slate-400 uppercase font-bold">Fator de Retenção</span>
-                    <p className="text-xs text-slate-300">{viralResult.hook_breakdown.retention_factor}</p>
+                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                    <span className="font-bold text-purple-300 block mb-1">🔥 Gatilho Emocional</span>
+                    <p className="text-slate-300">{viralResult.hook_breakdown.emotional_trigger}</p>
                   </div>
                 </div>
               </div>
 
-              {/* Card 2: Roteiro Inédito Pronto para Gravar */}
-              <div className="bg-slate-900 border border-indigo-500/30 rounded-xl p-4 sm:p-6 space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
-                  <div>
-                    <span className="text-[10px] font-bold uppercase text-indigo-400 tracking-wider">
-                      Roteiro Inédito Adaptado para o seu Perfil
-                    </span>
-                    <h3 className="text-base font-bold text-white mt-0.5">{viralResult.new_script.title}</h3>
+              {/* Roteiro Inédito Adaptado */}
+              <div className="lg:col-span-7 bg-slate-900 border border-emerald-500/30 rounded-2xl p-5 shadow-xl space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <Film className="w-4 h-4 text-emerald-400" />
+                    <h4 className="text-sm font-bold text-white">Roteiro Inédito para sua Empresa</h4>
                   </div>
-
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-bold border border-emerald-500/30">
-                    <Award className="w-3.5 h-3.5" /> Score Viral: {viralResult.new_script.virality_score}/100
-                  </div>
+                  <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                    Score: {viralResult.new_script.virality_score}/100
+                  </span>
                 </div>
 
                 {/* Gancho dos 3 Segundos */}
-                <div className="p-3.5 rounded-lg bg-pink-500/10 border border-pink-500/20 space-y-1">
-                  <span className="text-[11px] font-bold text-pink-300 uppercase">
-                    Gancho 0 a 3 segundos (O que falar na abertura):
+                <div className="p-3.5 rounded-xl bg-emerald-950/20 border border-emerald-500/30 space-y-1">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-400 block">
+                    Gancho dos Primeiros 3 Segundos (Fale olhando para a câmera):
                   </span>
-                  <p className="text-sm font-bold text-white">&quot;{viralResult.new_script.hook_3s}&quot;</p>
+                  <p className="text-sm font-extrabold text-white">
+                    &quot;{viralResult.new_script.hook_3s}&quot;
+                  </p>
                 </div>
 
-                {/* Textos na Tela */}
-                {viralResult.new_script.on_screen_text?.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs text-slate-400 font-semibold">Texto para colocar na tela:</span>
-                    {viralResult.new_script.on_screen_text.map((txt, i) => (
-                      <span key={i} className="px-2.5 py-1 rounded bg-slate-800 text-slate-200 text-xs font-mono font-bold">
-                        {txt}
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                {/* Beat Sheet Cronometrado */}
+                {/* Cronometragem do Vídeo (Beat Sheet) */}
                 <div className="space-y-2">
-                  <span className="text-xs font-bold text-slate-300 uppercase">Beat Sheet Cronometrado:</span>
-                  <div className="space-y-2">
-                    {viralResult.new_script.beat_sheet?.map((beat, i) => (
-                      <div key={i} className="p-3 rounded-lg bg-slate-950 border border-slate-800 flex flex-col sm:flex-row gap-3">
-                        <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-mono text-xs font-bold self-start">
+                  <span className="text-xs font-bold text-slate-300 block">Passo a Passo de Gravação (Cronômetro):</span>
+                  <div className="space-y-2 text-xs">
+                    {viralResult.new_script.beat_sheet.map((beat, idx) => (
+                      <div key={idx} className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-start gap-3">
+                        <span className="font-mono text-xs font-bold text-emerald-400 px-2 py-0.5 rounded bg-emerald-500/10 shrink-0">
                           {beat.time}
                         </span>
-                        <div className="space-y-1 text-xs">
-                          <p className="text-slate-400"><strong>Visual:</strong> {beat.visual}</p>
-                          <p className="text-white"><strong>Fala:</strong> &quot;{beat.speech}&quot;</p>
+                        <div className="space-y-0.5">
+                          <p className="text-[11px] text-slate-400"><strong>Visual:</strong> {beat.visual}</p>
+                          <p className="text-slate-200"><strong>Falar:</strong> &quot;{beat.speech}&quot;</p>
                         </div>
                       </div>
                     ))}
                   </div>
                 </div>
 
-                {/* Legenda e CTA */}
-                <div className="p-3 rounded-lg bg-slate-950 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-300">Legenda Pronta para o Vídeo:</span>
-                    <button
-                      onClick={() => copyToClipboard(viralResult.new_script.caption, 'viral-caption')}
-                      className="px-2.5 py-1 text-[11px] font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 rounded flex items-center gap-1 transition"
-                    >
-                      {copiedKey === 'viral-caption' ? 'Copiado!' : 'Copiar Legenda'}
-                    </button>
-                  </div>
-                  <p className="text-xs text-slate-300 whitespace-pre-wrap leading-relaxed">
-                    {viralResult.new_script.caption}
-                  </p>
-                  <p className="text-xs text-emerald-400 font-semibold pt-1">
-                    CTA: {viralResult.new_script.cta}
-                  </p>
+                {/* CTA e Legenda */}
+                <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2 text-xs">
+                  <span className="font-bold text-white block">Legenda Recomendada:</span>
+                  <p className="text-slate-300 whitespace-pre-wrap">{viralResult.new_script.caption}</p>
                 </div>
+
+                {/* Botão de Cópia */}
+                <button
+                  onClick={() =>
+                    copyToClipboard(
+                      `ROTEIRO VIRAL:\n${viralResult.new_script.title}\n\nGANCHO 3s:\n${viralResult.new_script.hook_3s}\n\nCRONOGRAMA:\n${viralResult.new_script.beat_sheet
+                        .map((b) => `[${b.time}] ${b.speech} (Câmera: ${b.visual})`)
+                        .join('\n')}\n\nLEGENDA:\n${viralResult.new_script.caption}`,
+                      'viral-script'
+                    )
+                  }
+                  className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition flex items-center justify-center gap-2"
+                >
+                  {copiedKey === 'viral-script' ? (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Roteiro Copiado para a Área de Transferência!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      <span>Copiar Roteiro Completo para Gravação</span>
+                    </>
+                  )}
+                </button>
               </div>
             </div>
           )}
         </div>
       )}
 
-      {/* ABA 3: CRIADOR DE CONTEÚDO (21 Ganchos Virais & IA) */}
-      {activeTab === 'create' && (
-        <div className="space-y-6">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-6 space-y-4">
-            <div className="space-y-1">
-              <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-indigo-400" />
-                Criador de Publicações com 21 Ganchos Virais
-              </h3>
-              <p className="text-xs text-slate-400">
-                Gere posts com fotos de estúdio por IA, roteiros de Reels ou carrosséis com retenção comprovada e tom humano.
-              </p>
-            </div>
-
-            {/* Seleção do Formato */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => setPostFormat('single_image')}
-                className={`p-3 rounded-xl border text-left flex items-start gap-3 transition ${
-                  postFormat === 'single_image'
-                    ? 'bg-indigo-600/20 border-indigo-500 text-white'
-                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                }`}
-              >
-                <ImageIcon className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
-                <div>
-                  <span className="block text-xs font-bold">Foto IA + Legenda</span>
-                  <span className="text-[10px] text-slate-400">Post único para feed</span>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setPostFormat('reel_script')}
-                className={`p-3 rounded-xl border text-left flex items-start gap-3 transition ${
-                  postFormat === 'reel_script'
-                    ? 'bg-indigo-600/20 border-indigo-500 text-white'
-                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                }`}
-              >
-                <Film className="w-4 h-4 text-pink-400 shrink-0 mt-0.5" />
-                <div>
-                  <span className="block text-xs font-bold">Roteiro de Reels (/ig-reel)</span>
-                  <span className="text-[10px] text-slate-400">Gancho 3s + cronometragem</span>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setPostFormat('carousel')}
-                className={`p-3 rounded-xl border text-left flex items-start gap-3 transition ${
-                  postFormat === 'carousel'
-                    ? 'bg-indigo-600/20 border-indigo-500 text-white'
-                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                }`}
-              >
-                <Layers className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                <div>
-                  <span className="block text-xs font-bold">Carrossel (/ig-carousel)</span>
-                  <span className="text-[10px] text-slate-400">5 slides com valor didático</span>
-                </div>
-              </button>
-            </div>
-
-            {/* Input e Disparo */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-2">
-              <input
-                type="text"
-                placeholder="Tema opcional (ex: Dica de ouro para quem quer economizar tempo)..."
-                value={topicHint}
-                onChange={(e) => setTopicHint(e.target.value)}
-                className="flex-1 px-3.5 py-2.5 text-xs sm:text-sm bg-slate-950 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-              />
-              <button
-                onClick={handleGeneratePost}
-                disabled={generatingPost}
-                className="w-full sm:w-auto px-6 py-2.5 text-xs sm:text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded-lg shadow flex items-center justify-center gap-2 transition shrink-0"
-              >
-                {generatingPost ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" /> Gerando com IA...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-4 h-4" /> Gerar Publicação
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-
-          {/* Lista de Posts Salvos */}
-          <div className="space-y-3">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-              Fila de Publicações ({posts.length})
-            </h4>
-
-            {posts.length === 0 ? (
-              <p className="text-xs text-slate-500 italic">Nenhum post criado ainda.</p>
-            ) : (
-              <div className="grid md:grid-cols-2 gap-4">
-                {posts.map((post) => (
-                  <div key={post.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-                        {post.post_type}
-                      </span>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-semibold">
-                        Gancho: {post.metrics?.hook_score || 94}/100
-                      </span>
-                    </div>
-
-                    <h4 className="text-sm font-bold text-white">{post.hook_title}</h4>
-
-                    {post.media_urls?.[0] && (
-                      <img src={post.media_urls[0]} alt="" className="w-full h-44 object-cover rounded-lg border border-slate-800" />
-                    )}
-
-                    <p className="text-xs text-slate-300 line-clamp-3 leading-relaxed">{post.caption}</p>
-
-                    <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
-                      <button
-                        onClick={() => copyToClipboard(post.caption, post.id)}
-                        className="text-xs text-slate-400 hover:text-white flex items-center gap-1"
-                      >
-                        <Copy className="w-3.5 h-3.5" /> {copiedKey === post.id ? 'Copiado!' : 'Copiar'}
-                      </button>
-
-                      <span className="text-[10px] text-slate-400">
-                        {new Date(post.created_at).toLocaleDateString('pt-BR')}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ABA 4: SOCIAL SELLING (Comentar em outros perfis) */}
-      {activeTab === 'comments' && (
-        <div className="space-y-5">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-6 space-y-4">
-            <div className="space-y-1">
-              <h3 className="text-base sm:text-lg font-bold text-white">
-                Social Selling: Comentar em Outros Perfis
-              </h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Cole o post de um concorrente ou influenciador do seu nicho. O robô escreve 3 comentários com autoridade para você postar e atrair seguidores.
-              </p>
-            </div>
-
-            <textarea
-              rows={3}
-              value={competitorText}
-              onChange={(e) => setCompetitorText(e.target.value)}
-              placeholder="Cole o texto do post de outro perfil..."
-              className="w-full px-3.5 py-2.5 text-xs sm:text-sm bg-slate-950 border border-slate-700 rounded-lg text-white"
-            />
-
-            <button
-              onClick={handleGenerateComments}
-              disabled={generatingComments}
-              className="w-full sm:w-auto px-6 py-2.5 text-xs sm:text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-lg transition"
-            >
-              {generatingComments ? 'Gerando...' : 'Gerar 3 Comentários Magnéticos'}
-            </button>
-          </div>
-
-          {generatedComments.length > 0 && (
-            <div className="space-y-3">
-              <h4 className="text-xs font-bold text-slate-300 uppercase">Comentários Sugeridos:</h4>
-              <div className="grid gap-3">
-                {generatedComments.map((com, idx) => (
-                  <div key={idx} className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between gap-3">
-                    <p className="text-xs text-slate-200 flex-1">&quot;{com}&quot;</p>
-                    <button
-                      onClick={() => copyToClipboard(com, `com-${idx}`)}
-                      className="px-3 py-1.5 text-xs font-semibold text-white bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 shrink-0"
-                    >
-                      {copiedKey === `com-${idx}` ? 'Copiado!' : 'Copiar'}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ABA 5: OTIMIZAÇÃO DE PERFIL (/ig-profile) */}
-      {activeTab === 'audit' && (
-        <div className="space-y-5">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-6 space-y-4">
-            <div className="space-y-1">
-              <h3 className="text-base sm:text-lg font-bold text-white">
-                Auditoria & Otimização de Perfil (/ig-profile)
-              </h3>
-              <p className="text-xs text-slate-400">
-                Avalie a força da sua bio atual e receba uma reestruturação para transformar visitantes em seguidores.
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <label className="block text-xs font-semibold text-slate-300">
-                Sua Bio Atual (opcional):
-              </label>
-              <textarea
-                rows={3}
-                value={currentBioInput}
-                onChange={(e) => setCurrentBioInput(e.target.value)}
-                placeholder="Cole o texto da sua bio atual do Instagram..."
-                className="w-full px-3.5 py-2.5 text-xs sm:text-sm bg-slate-950 border border-slate-700 rounded-lg text-white"
-              />
-            </div>
-
-            <button
-              onClick={handleAuditProfile}
-              disabled={auditingProfile}
-              className="w-full sm:w-auto px-6 py-2.5 text-xs sm:text-sm font-bold text-white bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 rounded-lg transition"
-            >
-              {auditingProfile ? 'Auditando com IA...' : 'Avaliar e Otimizar Perfil'}
-            </button>
-          </div>
-
-          {auditResult && (
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-6 space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <span className="text-xs font-bold text-slate-300">Diagnóstico do Perfil:</span>
-                <span className="text-sm font-bold px-3 py-1 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-                  Nota: {auditResult.score}/100
-                </span>
-              </div>
-
-              <p className="text-xs text-slate-300 font-medium">{auditResult.headline_evaluation}</p>
-
-              <div className="grid sm:grid-cols-2 gap-4 pt-2">
-                <div className="p-3.5 rounded-lg bg-slate-950 space-y-1.5">
-                  <span className="text-[11px] font-bold text-emerald-400 uppercase">Pontos Fortes:</span>
-                  <ul className="text-xs text-slate-300 list-disc list-inside space-y-1">
-                    {auditResult.strengths?.map((s, i) => (
-                      <li key={i}>{s}</li>
-                    ))}
-                  </ul>
-                </div>
-
-                <div className="p-3.5 rounded-lg bg-slate-950 space-y-1.5">
-                  <span className="text-[11px] font-bold text-amber-400 uppercase">Oportunidades de Melhoria:</span>
-                  <ul className="text-xs text-slate-300 list-disc list-inside space-y-1">
-                    {auditResult.improvements?.map((im, i) => (
-                      <li key={i}>{im}</li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-
-              <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-cyan-400 uppercase">Bio Recomendada para Alta Conversão:</span>
-                  <button
-                    onClick={() => copyToClipboard(auditResult.suggested_bio, 'bio')}
-                    className="text-xs text-slate-400 hover:text-white flex items-center gap-1"
-                  >
-                    <Copy className="w-3.5 h-3.5" /> {copiedKey === 'bio' ? 'Copiado!' : 'Copiar Bio'}
-                  </button>
-                </div>
-                <p className="text-xs text-white font-mono whitespace-pre-wrap leading-relaxed">
-                  {auditResult.suggested_bio}
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ABA 6: PLANEJAMENTO SEMANAL (/ig-plan) */}
+      {/* =========================================================================
+          ABA 3: PLANEJADOR SEMANAL DE CONTEÚDO
+      ========================================================================== */}
       {activeTab === 'plan' && (
-        <div className="space-y-5">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-6 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="space-y-1">
-                <h3 className="text-base sm:text-lg font-bold text-white">Planejador Semanal (/ig-plan)</h3>
-                <p className="text-xs text-slate-400">
-                  Grade de 7 dias distribuída nos pilares: Autoridade, Conexão, Venda e Atração.
-                </p>
-              </div>
-
-              <button
-                onClick={handleGeneratePlan}
-                disabled={generatingPlan}
-                className="w-full sm:w-auto px-5 py-2.5 text-xs font-bold text-white bg-amber-600 hover:bg-amber-500 disabled:opacity-50 rounded-lg transition"
-              >
-                {generatingPlan ? 'Planejando...' : 'Gerar Nova Grade Semanal'}
-              </button>
+        <div className="space-y-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-emerald-400" />
+                Planejador Semanal de Conteúdo (4 Pilares)
+              </h3>
+              <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+                Distribui 7 dias de publicações equilibrando Autoridade, Conexão, Venda e Atração de novos seguidores.
+              </p>
             </div>
 
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
-              {(weeklyPlan.length > 0
-                ? weeklyPlan
-                : [
-                    { day: 'Segunda-feira', pillar: 'Atração', format: 'Reels', hook_title: 'O erro que todo mundo comete ao começar', key_message: 'Desmistificar o maior gargalo inicial.', cta: 'Comente GUIA.' },
-                    { day: 'Terça-feira', pillar: 'Autoridade', format: 'Carrossel', hook_title: '3 regras de ouro que mudaram tudo', key_message: 'Tutorial educativo passo a passo.', cta: 'Salve para consultar.' },
-                    { day: 'Quarta-feira', pillar: 'Conexão', format: 'Post com Foto', hook_title: 'Os bastidores que ninguém mostra', key_message: 'História autêntica da jornada.', cta: 'Conte sua história.' },
-                    { day: 'Quinta-feira', pillar: 'Venda', format: 'Reels', hook_title: 'Como nossos clientes resolvem isso em 48h', key_message: 'Estudo de caso e oferta direta.', cta: 'Comente QUERO.' },
-                    { day: 'Sexta-feira', pillar: 'Atração', format: 'Carrossel', hook_title: 'Checklist definitivo para o fim de semana', key_message: 'Conteúdo salvável e compartilhável.', cta: 'Compartilhe.' },
-                    { day: 'Sábado', pillar: 'Conexão', format: 'Post com Foto', hook_title: 'Reflexão rápida de sábado', key_message: 'Mensagem leve e humanizada.', cta: 'Bom descanso.' },
-                    { day: 'Domingo', pillar: 'Autoridade', format: 'Reels', hook_title: 'Planeje sua semana antes de começar na correria', key_message: 'Dica estratégica de alta relevância.', cta: 'Deixe seu fogo 🔥.' },
-                  ]
-              ).map((item, idx) => (
-                <div key={idx} className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5 flex flex-col justify-between">
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-white">{item.day}</span>
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-medium">
-                        {item.pillar}
-                      </span>
-                    </div>
-                    <p className="text-xs text-white font-semibold">&quot;{item.hook_title}&quot;</p>
-                    <p className="text-[11px] text-slate-400">{item.key_message}</p>
+            <button
+              onClick={handleGeneratePlan}
+              disabled={generatingPlan}
+              className="py-2.5 px-5 rounded-xl font-bold text-xs sm:text-sm bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition flex items-center gap-2 shadow-lg shadow-emerald-500/20 shrink-0 disabled:opacity-50"
+            >
+              <Sparkles className={`w-4 h-4 ${generatingPlan ? 'animate-spin' : ''}`} />
+              <span>{generatingPlan ? 'Montando Grade da Semana...' : 'Gerar Nova Grade Semanal'}</span>
+            </button>
+          </div>
+
+          {/* Grade de 7 Dias */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {(weeklyPlan.length > 0 ? weeklyPlan : getDefaultWeeklyPlan()).map((item, idx) => (
+              <div
+                key={idx}
+                className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between gap-3 shadow-lg hover:border-slate-700 transition"
+              >
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white">{item.day}</span>
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${getPillarBadge(item.pillar)}`}
+                    >
+                      {item.pillar}
+                    </span>
                   </div>
-                  <span className="text-[10px] text-emerald-400 font-medium pt-1 border-t border-slate-900">
+
+                  <span className="text-[11px] font-semibold text-slate-400 block">{item.format}</span>
+
+                  <h5 className="text-xs font-bold text-slate-100 leading-snug line-clamp-2">
+                    &quot;{item.hook_title}&quot;
+                  </h5>
+
+                  <p className="text-[11px] text-slate-400 leading-relaxed line-clamp-3">
+                    {item.key_message}
+                  </p>
+                </div>
+
+                <div className="pt-2 border-t border-slate-800">
+                  <span className="text-[10px] text-emerald-400 font-semibold block truncate">
                     CTA: {item.cta}
                   </span>
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
 
-      {/* ABA 7: GUIA DE VOZ & TOKENS (voice.md) */}
-      {activeTab === 'digest' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-6 space-y-6">
-          <div className="space-y-1">
-            <h3 className="text-base sm:text-lg font-bold text-white">
-              Guia de Voz & Economia de 90%+ em Tokens (voice.md)
-            </h3>
-            <p className="text-xs text-slate-400">
-              O agente sintetiza todo o DNA da marca em um documento compacto de ~400 tokens, evitando chamadas repetitivas e garantindo copy humana.
-            </p>
+      {/* =========================================================================
+          ABA 4: ESTRATÉGIA, PERFIL & CONEXÃO
+      ========================================================================== */}
+      {activeTab === 'settings' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Coluna 1: Auditoria de Perfil & Social Selling */}
+          <div className="lg:col-span-6 space-y-6">
+            {/* Auditoria de Perfil (/ig-profile) */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  <UserCheck className="w-4 h-4 text-emerald-400" />
+                  Auditoria de Perfil &amp; Bio (/ig-profile)
+                </h4>
+                <span className="text-[10px] text-slate-400">Transforme visitantes em clientes</span>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-1.5">Sua Bio Atual do Instagram</label>
+                <textarea
+                  rows={3}
+                  value={currentBioInput}
+                  onChange={(e) => setCurrentBioInput(e.target.value)}
+                  placeholder="Cole aqui a bio do seu perfil atual para a IA avaliar e otimizar..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition resize-none"
+                />
+              </div>
+
+              <button
+                onClick={handleAuditProfile}
+                disabled={auditingProfile}
+                className="w-full py-2.5 rounded-xl font-bold text-xs bg-slate-800 hover:bg-slate-700 text-white transition flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                <CheckCircle2 className={`w-3.5 h-3.5 ${auditingProfile ? 'animate-spin text-emerald-400' : ''}`} />
+                <span>{auditingProfile ? 'Analisando perfil...' : 'Auditar Bio e Calcular Nota'}</span>
+              </button>
+
+              {auditResult && (
+                <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-white">Pontuação da Bio</span>
+                    <span className="font-extrabold text-emerald-400 text-base">{auditResult.score}/100</span>
+                  </div>
+                  <p className="text-slate-400">{auditResult.headline_evaluation}</p>
+
+                  <div className="p-3 rounded-lg bg-emerald-950/20 border border-emerald-500/30">
+                    <span className="font-bold text-emerald-300 block mb-1">Bio Recomendada (Pronta para colar):</span>
+                    <p className="text-slate-200 whitespace-pre-wrap">{auditResult.suggested_bio}</p>
+                    <button
+                      onClick={() => copyToClipboard(auditResult.suggested_bio, 'suggested-bio')}
+                      className="mt-2 text-[11px] font-bold text-emerald-400 hover:underline flex items-center gap-1"
+                    >
+                      {copiedKey === 'suggested-bio' ? 'Copiada!' : 'Copiar Bio Sugerida'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Social Selling: Gerador de Comentários */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4 text-sky-400" />
+                  Social Selling: Comentários Magnéticos
+                </h4>
+                <span className="text-[10px] text-slate-400">Atraia tráfego de outros perfis</span>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-1.5">Texto do Post do Concorrente</label>
+                <textarea
+                  rows={2}
+                  value={competitorText}
+                  onChange={(e) => setCompetitorText(e.target.value)}
+                  placeholder="Cole aqui o conteúdo de um post do nicho para gerar comentários de autoridade..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 transition resize-none"
+                />
+              </div>
+
+              <button
+                onClick={handleGenerateComments}
+                disabled={generatingComments}
+                className="w-full py-2.5 rounded-xl font-bold text-xs bg-slate-800 hover:bg-slate-700 text-white transition flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                <span>{generatingComments ? 'Gerando opções...' : 'Gerar 3 Comentários Magnéticos'}</span>
+              </button>
+
+              {generatedComments.length > 0 && (
+                <div className="space-y-2 pt-1">
+                  {generatedComments.map((com, idx) => (
+                    <div key={idx} className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-start justify-between gap-2 text-xs">
+                      <p className="text-slate-300 leading-relaxed">&quot;{com}&quot;</p>
+                      <button
+                        onClick={() => copyToClipboard(com, `com-${idx}`)}
+                        className="p-1.5 hover:text-emerald-400 transition shrink-0"
+                        title="Copiar comentário"
+                      >
+                        {copiedKey === `com-${idx}` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
-          <div className="grid lg:grid-cols-2 gap-6">
-            <div className="space-y-4">
+          {/* Coluna 2: Configurações de Marca & Meta API */}
+          <div className="lg:col-span-6 space-y-6">
+            {/* Tom de Voz e DNA */}
+            <form onSubmit={handleSaveSettings} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+              <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-emerald-400" />
+                Voz da Marca &amp; Nicho
+              </h4>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">Nome da Empresa</label>
+                  <input
+                    type="text"
+                    value={formData.account_name}
+                    onChange={(e) => setFormData({ ...formData, account_name: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">@ do Instagram</label>
+                  <input
+                    type="text"
+                    value={formData.account_username}
+                    onChange={(e) => setFormData({ ...formData, account_username: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
+                  />
+                </div>
+              </div>
+
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Nicho</label>
+                <label className="text-xs text-slate-400 block mb-1">Nicho de Atuação</label>
                 <input
                   type="text"
                   value={formData.niche}
                   onChange={(e) => setFormData({ ...formData, niche: e.target.value })}
-                  className="w-full px-3 py-2 text-xs sm:text-sm bg-slate-950 border border-slate-700 rounded-lg text-white"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Palavras que a marca USA</label>
+                <label className="text-xs text-slate-400 block mb-1">Público-Alvo</label>
                 <input
                   type="text"
-                  value={formData.wordsIUse}
-                  onChange={(e) => setFormData({ ...formData, wordsIUse: e.target.value })}
-                  placeholder="Ex: na prática, direto ao ponto, sem enrolação"
-                  className="w-full px-3 py-2 text-xs sm:text-sm bg-slate-950 border border-slate-700 rounded-lg text-white"
+                  value={formData.target_audience}
+                  onChange={(e) => setFormData({ ...formData, target_audience: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-rose-300 mb-1">Palavras PROIBIDAS (Anti-IA)</label>
+                <label className="text-xs text-slate-400 block mb-1">Tom de Voz</label>
                 <input
                   type="text"
-                  value={formData.wordsINeverSay}
-                  onChange={(e) => setFormData({ ...formData, wordsINeverSay: e.target.value })}
-                  placeholder="Ex: mergulhar conosco, no cenário atual, desbloqueie seu potencial"
-                  className="w-full px-3 py-2 text-xs sm:text-sm bg-slate-950 border border-slate-700 rounded-lg text-white"
+                  value={formData.brand_voice}
+                  onChange={(e) => setFormData({ ...formData, brand_voice: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
                 />
               </div>
 
-              <button
-                type="button"
-                onClick={handleGenerateDigest}
-                disabled={generatingDigest}
-                className="w-full py-2.5 rounded-lg text-xs font-bold text-white bg-amber-600 hover:bg-amber-500 disabled:opacity-50 transition"
-              >
-                {generatingDigest ? 'Sintetizando...' : 'Gerar / Atualizar Knowledge Digest'}
-              </button>
-            </div>
-
-            <div className="flex flex-col space-y-2">
-              <label className="text-xs font-semibold text-slate-300">Documento Ativo (~400 tokens):</label>
-              <div className="flex-1 min-h-[260px] p-4 bg-slate-950 border border-slate-800 rounded-lg font-mono text-xs text-slate-300 whitespace-pre-wrap overflow-y-auto">
-                {account?.brand_knowledge_digest || 'Nenhum documento gerado ainda.'}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ABA 8: AUTOMAÇÃO DE DIRECT & GATILHOS */}
-      {activeTab === 'automation' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-6 space-y-4">
-          <div className="space-y-1">
-            <h3 className="text-base sm:text-lg font-bold text-white">
-              Automação &quot;Comente X e receba no Direct&quot;
-            </h3>
-            <p className="text-xs text-slate-400">
-              Quando alguém comentar uma palavra-chave nas suas postagens, o robô responde publicamente e envia o link no Direct.
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-4 p-4 bg-slate-950 border border-slate-800 rounded-xl">
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Palavra-Chave</label>
-              <input type="text" defaultValue="INSTAGRAM" className="w-full px-3 py-2 text-xs sm:text-sm bg-slate-900 border border-slate-700 rounded-lg text-white" />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Resposta no Comentário</label>
-              <input type="text" defaultValue="Acabei de te enviar no Direct! 🚀 Confere lá." className="w-full px-3 py-2 text-xs sm:text-sm bg-slate-900 border border-slate-700 rounded-lg text-white" />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Mensagem no Direct</label>
-              <input type="text" defaultValue="Olá! Aqui está o link exclusivo que você pediu: https://seusite.com.br" className="w-full px-3 py-2 text-xs sm:text-sm bg-slate-900 border border-slate-700 rounded-lg text-white" />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ABA 9: CONFIGURAÇÕES E HORÁRIOS */}
-      {activeTab === 'settings' && (
-        <div className="space-y-6">
-          {/* Card de Conexão Oficial com a Meta */}
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-6 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
-              <div className="space-y-0.5">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                    <InstagramIcon className="w-5 h-5 text-pink-500" />
-                    Conexão Oficial da API (Meta Graph API)
-                  </h3>
-                  {isMetaConnected ? (
-                    <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/30 flex items-center gap-1">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /> Conectado Oficialmente
-                    </span>
-                  ) : (
-                    <span className="px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[10px] font-medium border border-slate-700">
-                      Modo Copiloto / WhatsApp
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-slate-400">
-                  {isMetaConnected
-                    ? 'Sua conta do Instagram Business está conectada via Meta Graph API oficial. Posts agendados podem ser publicados direto no feed!'
-                    : 'Operando no Modo Copiloto: a IA gera roteiros, fotos e legendas completas e te envia para aprovação com 1 toque.'}
-                </p>
-              </div>
-
-              {isMetaConnected && (
-                <button
-                  type="button"
-                  onClick={handleDisconnectMeta}
-                  disabled={isConnectingMeta}
-                  className="px-3 py-1.5 text-xs font-semibold text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 rounded-lg transition"
-                >
-                  Desconectar Meta
-                </button>
-              )}
-            </div>
-
-            {/* Formulário de Conexão da Meta */}
-            <form onSubmit={handleConnectMeta} className="space-y-4 pt-1">
-              <div className="grid sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Instagram Business Account ID
-                  </label>
-                  <input
-                    type="text"
-                    value={metaBusinessId}
-                    onChange={(e) => setMetaBusinessId(e.target.value)}
-                    placeholder="Ex: 17841405309211738"
-                    className="w-full px-3 py-2 text-xs sm:text-sm bg-slate-950 border border-slate-700 rounded-lg text-white"
-                  />
-                  <span className="text-[10px] text-slate-500">ID da conta empresarial no Gerenciador da Meta</span>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Meta Access Token (Token de Longa Duração)
-                  </label>
-                  <input
-                    type="password"
-                    value={metaAccessToken}
-                    onChange={(e) => setMetaAccessToken(e.target.value)}
-                    placeholder="EAAB..."
-                    className="w-full px-3 py-2 text-xs sm:text-sm bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
-                  />
-                  <span className="text-[10px] text-slate-500">Token gerado em developers.facebook.com com permissão instagram_content_publish</span>
-                </div>
-              </div>
-
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-2">
-                <a
-                  href="https://developers.facebook.com/tools/explorer/"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" /> Abrir Graph API Explorer da Meta
-                </a>
-
-                <button
-                  type="submit"
-                  disabled={isConnectingMeta}
-                  className="w-full sm:w-auto px-5 py-2 text-xs font-bold text-white bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 disabled:opacity-50 rounded-lg shadow transition"
-                >
-                  {isConnectingMeta ? 'Validando na Meta...' : 'Testar e Salvar Conexão Meta'}
-                </button>
-              </div>
-            </form>
-          </div>
-
-          {/* Configurações de Horário e Perfil */}
-          <form onSubmit={handleSaveSettings} className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-6 space-y-4">
-            <div className="space-y-1">
-              <h3 className="text-base sm:text-lg font-bold text-white">Configurações de Horário e Perfil</h3>
-              <p className="text-xs text-slate-400">
-                Defina seu @ de usuário e os horários de operação do robô.
-              </p>
-            </div>
-
-            <div className="grid sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Nome da Marca</label>
-                <input
-                  type="text"
-                  value={formData.account_name}
-                  onChange={(e) => setFormData({ ...formData, account_name: e.target.value })}
-                  className="w-full px-3 py-2 text-xs sm:text-sm bg-slate-950 border border-slate-700 rounded-lg text-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">@ da Conta no Instagram</label>
-                <input
-                  type="text"
-                  value={formData.account_username}
-                  onChange={(e) => setFormData({ ...formData, account_username: e.target.value })}
-                  placeholder="seu_usuario"
-                  className="w-full px-3 py-2 text-xs sm:text-sm bg-slate-950 border border-slate-700 rounded-lg text-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Horário de Postagem</label>
-                <input
-                  type="time"
-                  value={formData.preferred_post_time}
-                  onChange={(e) => setFormData({ ...formData, preferred_post_time: e.target.value })}
-                  className="w-full px-3 py-2 text-xs sm:text-sm bg-slate-950 border border-slate-700 rounded-lg text-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Tempo Limite de Espera no WhatsApp</label>
-                <select
-                  value={formData.approval_timeout_hours}
-                  onChange={(e) => setFormData({ ...formData, approval_timeout_hours: Number(e.target.value) })}
-                  className="w-full px-3 py-2 text-xs sm:text-sm bg-slate-950 border border-slate-700 rounded-lg text-white"
-                >
-                  <option value={2}>2 horas</option>
-                  <option value={4}>4 horas (recomendado)</option>
-                  <option value={8}>8 horas</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="pt-3 border-t border-slate-800 flex justify-end">
               <button
                 type="submit"
-                disabled={savingSettings}
-                className="w-full sm:w-auto px-6 py-2.5 rounded-lg text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition"
+                className="w-full py-2.5 rounded-xl font-bold text-xs bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition"
               >
-                {savingSettings ? 'Salvando...' : 'Salvar Configurações'}
+                Salvar Diretrizes de Marca
               </button>
+            </form>
+
+            {/* Conexão Meta Graph API (Opcional) */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Share2 className="w-4 h-4 text-emerald-400" />
+                  Publicação Direta (Meta Graph API)
+                </h4>
+                <span
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                    isMetaConnected
+                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                      : 'bg-slate-800 text-slate-400 border border-slate-700'
+                  }`}
+                >
+                  {isMetaConnected ? 'Conectado' : 'Opcional'}
+                </span>
+              </div>
+
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Permite enviar a foto e a legenda direto para o feed com 1 clique. Caso prefira o modo Copiloto, basta copiar a legenda e baixar a foto gerada.
+              </p>
+
+              {isMetaConnected ? (
+                <div className="p-4 rounded-xl bg-emerald-950/20 border border-emerald-500/30 flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs text-emerald-300 font-semibold">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <span>Conta vinculada (@{account?.account_username || 'oficial'})</span>
+                  </div>
+                  <button
+                    onClick={handleDisconnectMeta}
+                    disabled={isConnectingMeta}
+                    className="px-3 py-1.5 rounded-lg border border-rose-500/40 text-rose-300 hover:bg-rose-500/10 text-xs font-semibold transition"
+                  >
+                    Desconectar
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleConnectMeta} className="space-y-3">
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Instagram Business Account ID</label>
+                    <input
+                      type="text"
+                      value={metaBusinessId}
+                      onChange={(e) => setMetaBusinessId(e.target.value)}
+                      placeholder="Ex: 17841405309211..."
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Meta User Access Token (Long-Lived)</label>
+                    <input
+                      type="password"
+                      value={metaAccessToken}
+                      onChange={(e) => setMetaAccessToken(e.target.value)}
+                      placeholder="EAABwz..."
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isConnectingMeta}
+                    className="w-full py-2.5 rounded-xl font-bold text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 transition"
+                  >
+                    {isConnectingMeta ? 'Validando...' : 'Conectar Conta da Meta'}
+                  </button>
+                </form>
+              )}
             </div>
-          </form>
+          </div>
         </div>
       )}
     </div>
   );
+}
+
+function getPillarBadge(pillar: string): string {
+  switch (pillar) {
+    case 'Autoridade':
+      return 'bg-purple-500/15 text-purple-300 border-purple-500/30';
+    case 'Conexão':
+      return 'bg-sky-500/15 text-sky-300 border-sky-500/30';
+    case 'Venda':
+      return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+    case 'Atração':
+      return 'bg-amber-500/15 text-amber-300 border-amber-500/30';
+    default:
+      return 'bg-slate-800 text-slate-400 border-slate-700';
+  }
+}
+
+function getDefaultWeeklyPlan(): WeeklyPlanItem[] {
+  return [
+    {
+      day: 'Segunda-feira',
+      pillar: 'Atração',
+      format: 'Reels Curto',
+      hook_title: 'O erro número 1 que quase todo mundo comete ao começar',
+      key_message: 'Desmentir um mito comum do nicho nos primeiros 3 segundos.',
+      cta: 'Comente ERRO para receber o passo a passo no WhatsApp.',
+    },
+    {
+      day: 'Terça-feira',
+      pillar: 'Autoridade',
+      format: 'Carrossel Educativo',
+      hook_title: '3 passos práticos para aplicar ainda hoje no seu dia',
+      key_message: 'Tutorial rápido slide a slide entregando valor prático.',
+      cta: 'Salve este post para consultar mais tarde.',
+    },
+    {
+      day: 'Quarta-feira',
+      pillar: 'Conexão',
+      format: 'Post com Foto',
+      hook_title: 'Os bastidores do que ninguém te conta no dia a dia',
+      key_message: 'História real humanizada de superação da equipe.',
+      cta: 'Você já passou por isso? Me conte nos comentários.',
+    },
+    {
+      day: 'Quinta-feira',
+      pillar: 'Venda',
+      format: 'Reels de Oferta',
+      hook_title: 'Como nossos clientes alcançam essa meta sem estresse',
+      key_message: 'Demonstração do serviço e prova social forte.',
+      cta: 'Comente QUERO ou clique no link da bio para ser atendido agora.',
+    },
+    {
+      day: 'Sexta-feira',
+      pillar: 'Atração',
+      format: 'Carrossel Viral',
+      hook_title: 'Lista de ferramentas essenciais que você precisa conhecer',
+      key_message: 'Conteúdo altamente compartilhável que gera novos seguidores.',
+      cta: 'Mande este post para alguém que precisa ver isso.',
+    },
+    {
+      day: 'Sábado',
+      pillar: 'Conexão',
+      format: 'Post com Foto',
+      hook_title: 'O que aprendi esta semana trabalhando no nosso negócio',
+      key_message: 'Reflexão leve e autêntica de fim de semana.',
+      cta: 'Bom fim de semana a todos!',
+    },
+    {
+      day: 'Domingo',
+      pillar: 'Autoridade',
+      format: 'Reels Estratégico',
+      hook_title: 'Planeje sua semana antes de começar na correria',
+      key_message: 'Dica estratégica para organizar os próximos 7 dias.',
+      cta: 'Pronto para a nova semana? Deixe seu fogo 🔥.',
+    },
+  ];
 }
