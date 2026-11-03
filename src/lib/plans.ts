@@ -25,6 +25,35 @@ export const DEFAULT_ADDONS: CommercialAddons = {
   extraPackReplies: 1000,
 };
 
+export interface InstagramAddonDefinition {
+  id: 'instagram_agent';
+  name: string;
+  monthlyPrice: number;
+  description: string;
+  features: string[];
+}
+
+export const INSTAGRAM_ADDON: InstagramAddonDefinition = {
+  id: 'instagram_agent',
+  name: 'Módulo Agente Instagram',
+  monthlyPrice: 97.0,
+  description: 'Agente autônomo com IA para pesquisa de virais, geração de posts e imagens, agendamento e automação de Direct.',
+  features: [
+    'Pesquisa autônoma de tendências e ganchos virais',
+    'Geração de imagens de alta qualidade por IA',
+    'Aprovação opcional pelo WhatsApp antes de publicar',
+    'Publicação automática via Meta Graph API',
+    'Automação de Direct e Comentários ("Comente X")',
+    'Memória compacta (Knowledge Digest) com economia de 90% de tokens',
+  ],
+};
+
+export function hasInstagramAccess(tenant: any): boolean {
+  if (!tenant) return false;
+  if (tenant.is_super_admin) return true;
+  return tenant.has_instagram_module === true && (tenant.instagram_module_status === 'active' || tenant.instagram_module_status === 'trialing');
+}
+
 export function sanitizeAddonsConfig(input: any): CommercialAddons {
   const out: CommercialAddons = { ...DEFAULT_ADDONS };
   if (!input || typeof input !== 'object') return out;

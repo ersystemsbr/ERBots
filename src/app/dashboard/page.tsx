@@ -12,6 +12,7 @@ import UserProfileManager from '@/components/UserProfileManager';
 import AnalyticsDashboard from '@/components/AnalyticsDashboard';
 import OnboardingChecklist from '@/components/OnboardingChecklist';
 import ErSystemsAppsDashboard from '@/components/ErSystemsAppsDashboard';
+import InstagramAgentManager, { InstagramIcon } from '@/components/InstagramAgentManager';
 import { supabase } from '@/lib/supabase';
 import { authFetch } from '@/lib/api-client';
 import { getAccessState } from '@/lib/plans';
@@ -37,12 +38,15 @@ export default function DashboardPage() {
     { id: 'whatsapp', label: 'Conexão WhatsApp', icon: Bot },
     { id: 'bot-settings', label: 'Personalizar IA', icon: Sparkles },
     { id: 'knowledge', label: 'Base de Conhecimento', icon: BookOpen },
+    { id: 'instagram', label: 'Agente Instagram', icon: InstagramIcon },
     { id: 'plans', label: 'Planos & Assinaturas', icon: ShieldCheck },
     { id: 'profile', label: 'Dados da Empresa', icon: Building2 },
   ];
 
   const handleNavigate = (tab: string) => {
-    if (['whatsapp', 'bot-settings', 'knowledge', 'plans', 'profile'].includes(tab)) {
+    if (tab === 'instagram') {
+      setCurrentTab('instagram');
+    } else if (['whatsapp', 'bot-settings', 'knowledge', 'plans', 'profile'].includes(tab)) {
       setCurrentTab('settings');
       setSettingsSubTab(tab);
     } else {
@@ -228,6 +232,11 @@ export default function DashboardPage() {
           <AnalyticsDashboard tenantId={tenantId} onNavigateTab={handleNavigate} />
         )}
 
+        {/* ABA: Agente Instagram */}
+        {currentTab === 'instagram' && (
+          <InstagramAgentManager />
+        )}
+
         {/* ABA: Apps ER Systems (Ecossistema de Soluções) */}
         {currentTab === 'apps' && <ErSystemsAppsDashboard />}
 
@@ -284,6 +293,10 @@ export default function DashboardPage() {
 
               {settingsSubTab === 'knowledge' && (
                 <KnowledgeBaseManager tenantId={tenantId} tenantSegment={tenant?.segment} />
+              )}
+
+              {settingsSubTab === 'instagram' && (
+                <InstagramAgentManager />
               )}
 
               {settingsSubTab === 'plans' && (

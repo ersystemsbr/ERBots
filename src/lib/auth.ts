@@ -136,3 +136,16 @@ export async function requireTenantAccess(
 
   return { ok: true, ctx, tenant };
 }
+
+/** Busca o tenant principal vinculado ao usuário autenticado. */
+export async function getTenantForUser(userId: string) {
+  const supabase = getServiceSupabase();
+  const { data } = await supabase
+    .from('xerb_tenants')
+    .select('*')
+    .or(`user_id.eq.${userId},user_saas.eq.${userId}`)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data;
+}
