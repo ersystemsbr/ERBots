@@ -139,6 +139,12 @@ export default function InstagramAgentManager() {
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
+  // Meta Graph API Connection states
+  const [metaBusinessId, setMetaBusinessId] = useState('');
+  const [metaAccessToken, setMetaAccessToken] = useState('');
+  const [isConnectingMeta, setIsConnectingMeta] = useState(false);
+  const [isMetaConnected, setIsMetaConnected] = useState(false);
+
   // Virality Skill states
   const [viralReferenceInput, setViralReferenceInput] = useState('');
   const [viralResult, setViralResult] = useState<ViralAnalysis | null>(null);
@@ -197,6 +203,12 @@ export default function InstagramAgentManager() {
         setHasAccess(data.hasAccess);
         if (data.account) {
           setAccount(data.account);
+          if (data.account.instagram_business_id && data.account.access_token) {
+            setIsMetaConnected(true);
+            setMetaBusinessId(data.account.instagram_business_id);
+          } else {
+            setIsMetaConnected(false);
+          }
           setFormData({
             account_name: data.account.account_name || '',
             account_username: data.account.account_username || '',
@@ -350,6 +362,59 @@ export default function InstagramAgentManager() {
       setFeedbackMsg({ type: 'error', text: 'Erro ao auditar perfil.' });
     } finally {
       setAuditingProfile(false);
+    }
+  };
+
+  const handleConnectMeta = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!metaBusinessId.trim() || !metaAccessToken.trim()) {
+      setFeedbackMsg({ type: 'error', text: 'Preencha o Instagram Business ID e o Access Token da Meta.' });
+      return;
+    }
+    try {
+      setIsConnectingMeta(true);
+      const res = await authFetch('/api/tenant/instagram/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instagramBusinessId: metaBusinessId, accessToken: metaAccessToken }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setIsMetaConnected(true);
+        setAccount(data.account);
+        setFeedbackMsg({
+          type: 'success',
+          text: `Conta Oficial da Meta conectada com sucesso! (@${data.username || metaBusinessId}) - Publicação direta ativada.`,
+        });
+      } else {
+        const err = await res.json();
+        setFeedbackMsg({ type: 'error', text: formatErrorMessage(err) });
+      }
+    } catch {
+      setFeedbackMsg({ type: 'error', text: 'Erro ao validar conexão com a Meta.' });
+    } finally {
+      setIsConnectingMeta(false);
+    }
+  };
+
+  const handleDisconnectMeta = async () => {
+    try {
+      setIsConnectingMeta(true);
+      const res = await authFetch('/api/tenant/instagram/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'disconnect' }),
+      });
+      if (res.ok) {
+        setIsMetaConnected(false);
+        setMetaAccessToken('');
+        setFeedbackMsg({
+          type: 'success',
+          text: 'Conta da Meta desconectada. O agente continuará operando no Modo Copiloto / WhatsApp.',
+        });
+      }
+    } finally {
+      setIsConnectingMeta(false);
     }
   };
 
@@ -1364,70 +1429,164 @@ export default function InstagramAgentManager() {
 
       {/* ABA 9: CONFIGURAÇÕES E HORÁRIOS */}
       {activeTab === 'settings' && (
-        <form onSubmit={handleSaveSettings} className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-6 space-y-4">
-          <div className="space-y-1">
-            <h3 className="text-base sm:text-lg font-bold text-white">Configurações de Horário e Perfil</h3>
-            <p className="text-xs text-slate-400">
-              Defina seu @ de usuário e os horários de operação do robô.
-            </p>
+        <div className="space-y-6">
+          {/* Card de Conexão Oficial com a Meta */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-6 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                    <InstagramIcon className="w-5 h-5 text-pink-500" />
+                    Conexão Oficial da API (Meta Graph API)
+                  </h3>
+                  {isMetaConnected ? (
+                    <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/30 flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /> Conectado Oficialmente
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[10px] font-medium border border-slate-700">
+                      Modo Copiloto / WhatsApp
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-400">
+                  {isMetaConnected
+                    ? 'Sua conta do Instagram Business está conectada via Meta Graph API oficial. Posts agendados podem ser publicados direto no feed!'
+                    : 'Operando no Modo Copiloto: a IA gera roteiros, fotos e legendas completas e te envia para aprovação com 1 toque.'}
+                </p>
+              </div>
+
+              {isMetaConnected && (
+                <button
+                  type="button"
+                  onClick={handleDisconnectMeta}
+                  disabled={isConnectingMeta}
+                  className="px-3 py-1.5 text-xs font-semibold text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 rounded-lg transition"
+                >
+                  Desconectar Meta
+                </button>
+              )}
+            </div>
+
+            {/* Formulário de Conexão da Meta */}
+            <form onSubmit={handleConnectMeta} className="space-y-4 pt-1">
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Instagram Business Account ID
+                  </label>
+                  <input
+                    type="text"
+                    value={metaBusinessId}
+                    onChange={(e) => setMetaBusinessId(e.target.value)}
+                    placeholder="Ex: 17841405309211738"
+                    className="w-full px-3 py-2 text-xs sm:text-sm bg-slate-950 border border-slate-700 rounded-lg text-white"
+                  />
+                  <span className="text-[10px] text-slate-500">ID da conta empresarial no Gerenciador da Meta</span>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Meta Access Token (Token de Longa Duração)
+                  </label>
+                  <input
+                    type="password"
+                    value={metaAccessToken}
+                    onChange={(e) => setMetaAccessToken(e.target.value)}
+                    placeholder="EAAB..."
+                    className="w-full px-3 py-2 text-xs sm:text-sm bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
+                  />
+                  <span className="text-[10px] text-slate-500">Token gerado em developers.facebook.com com permissão instagram_content_publish</span>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-2">
+                <a
+                  href="https://developers.facebook.com/tools/explorer/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" /> Abrir Graph API Explorer da Meta
+                </a>
+
+                <button
+                  type="submit"
+                  disabled={isConnectingMeta}
+                  className="w-full sm:w-auto px-5 py-2 text-xs font-bold text-white bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 disabled:opacity-50 rounded-lg shadow transition"
+                >
+                  {isConnectingMeta ? 'Validando na Meta...' : 'Testar e Salvar Conexão Meta'}
+                </button>
+              </div>
+            </form>
           </div>
 
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Nome da Marca</label>
-              <input
-                type="text"
-                value={formData.account_name}
-                onChange={(e) => setFormData({ ...formData, account_name: e.target.value })}
-                className="w-full px-3 py-2 text-xs sm:text-sm bg-slate-950 border border-slate-700 rounded-lg text-white"
-              />
+          {/* Configurações de Horário e Perfil */}
+          <form onSubmit={handleSaveSettings} className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-6 space-y-4">
+            <div className="space-y-1">
+              <h3 className="text-base sm:text-lg font-bold text-white">Configurações de Horário e Perfil</h3>
+              <p className="text-xs text-slate-400">
+                Defina seu @ de usuário e os horários de operação do robô.
+              </p>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">@ da Conta no Instagram</label>
-              <input
-                type="text"
-                value={formData.account_username}
-                onChange={(e) => setFormData({ ...formData, account_username: e.target.value })}
-                placeholder="seu_usuario"
-                className="w-full px-3 py-2 text-xs sm:text-sm bg-slate-950 border border-slate-700 rounded-lg text-white"
-              />
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Nome da Marca</label>
+                <input
+                  type="text"
+                  value={formData.account_name}
+                  onChange={(e) => setFormData({ ...formData, account_name: e.target.value })}
+                  className="w-full px-3 py-2 text-xs sm:text-sm bg-slate-950 border border-slate-700 rounded-lg text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">@ da Conta no Instagram</label>
+                <input
+                  type="text"
+                  value={formData.account_username}
+                  onChange={(e) => setFormData({ ...formData, account_username: e.target.value })}
+                  placeholder="seu_usuario"
+                  className="w-full px-3 py-2 text-xs sm:text-sm bg-slate-950 border border-slate-700 rounded-lg text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Horário de Postagem</label>
+                <input
+                  type="time"
+                  value={formData.preferred_post_time}
+                  onChange={(e) => setFormData({ ...formData, preferred_post_time: e.target.value })}
+                  className="w-full px-3 py-2 text-xs sm:text-sm bg-slate-950 border border-slate-700 rounded-lg text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Tempo Limite de Espera no WhatsApp</label>
+                <select
+                  value={formData.approval_timeout_hours}
+                  onChange={(e) => setFormData({ ...formData, approval_timeout_hours: Number(e.target.value) })}
+                  className="w-full px-3 py-2 text-xs sm:text-sm bg-slate-950 border border-slate-700 rounded-lg text-white"
+                >
+                  <option value={2}>2 horas</option>
+                  <option value={4}>4 horas (recomendado)</option>
+                  <option value={8}>8 horas</option>
+                </select>
+              </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Horário de Postagem</label>
-              <input
-                type="time"
-                value={formData.preferred_post_time}
-                onChange={(e) => setFormData({ ...formData, preferred_post_time: e.target.value })}
-                className="w-full px-3 py-2 text-xs sm:text-sm bg-slate-950 border border-slate-700 rounded-lg text-white"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Tempo Limite de Espera no WhatsApp</label>
-              <select
-                value={formData.approval_timeout_hours}
-                onChange={(e) => setFormData({ ...formData, approval_timeout_hours: Number(e.target.value) })}
-                className="w-full px-3 py-2 text-xs sm:text-sm bg-slate-950 border border-slate-700 rounded-lg text-white"
+            <div className="pt-3 border-t border-slate-800 flex justify-end">
+              <button
+                type="submit"
+                disabled={savingSettings}
+                className="w-full sm:w-auto px-6 py-2.5 rounded-lg text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition"
               >
-                <option value={2}>2 horas</option>
-                <option value={4}>4 horas (recomendado)</option>
-                <option value={8}>8 horas</option>
-              </select>
+                {savingSettings ? 'Salvando...' : 'Salvar Configurações'}
+              </button>
             </div>
-          </div>
-
-          <div className="pt-3 border-t border-slate-800 flex justify-end">
-            <button
-              type="submit"
-              disabled={savingSettings}
-              className="w-full sm:w-auto px-6 py-2.5 rounded-lg text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition"
-            >
-              {savingSettings ? 'Salvando...' : 'Salvar Configurações'}
-            </button>
-          </div>
-        </form>
+          </form>
+        </div>
       )}
     </div>
   );

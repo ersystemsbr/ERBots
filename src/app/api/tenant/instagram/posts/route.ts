@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
 import { requireUser, getTenantForUser } from '@/lib/auth';
+import { publishPhotoToInstagram } from '@/lib/instagram-graph';
 
 export async function GET(req: NextRequest) {
   try {
@@ -55,8 +56,44 @@ export async function POST(req: NextRequest) {
       updates.status = 'rejected';
       updates.approval_responded_at = new Date().toISOString();
     } else if (action === 'publish_now') {
-      updates.status = 'published';
-      updates.published_at = new Date().toISOString();
+      // Se houver conexão com a Meta Graph API, dispara para o Instagram real
+      const { data: account } = await db
+        .from('xerb_instagram_accounts')
+        .select('instagram_business_id, access_token')
+        .eq('tenant_id', tenant.id)
+        .maybeSingle();
+
+      const { data: currentPost } = await db
+        .from('xerb_instagram_posts')
+        .select('*')
+        .eq('id', postId)
+        .eq('tenant_id', tenant.id)
+        .single();
+
+      if (account?.instagram_business_id && account?.access_token && currentPost?.media_urls?.[0]) {
+        // Posta na Meta Graph API
+        const pubResult = await publishPhotoToInstagram({
+          instagramBusinessId: account.instagram_business_id,
+          accessToken: account.access_token,
+          imageUrl: currentPost.media_urls[0],
+          caption: `${currentPost.caption}\n\n${(currentPost.hashtags || []).join(' ')}`,
+        });
+
+        if (pubResult.success) {
+          updates.meta_post_id = pubResult.meta_post_id;
+          updates.status = 'published';
+          updates.published_at = new Date().toISOString();
+        } else {
+          return NextResponse.json(
+            { error: `Falha na Meta Graph API: ${pubResult.error}` },
+            { status: 400 }
+          );
+        }
+      } else {
+        // Marca como publicado no modo manual/copiloto
+        updates.status = 'published';
+        updates.published_at = new Date().toISOString();
+      }
     }
 
     const { data, error } = await db
