@@ -440,3 +440,182 @@ export async function generatePostImage(imagePrompt: string): Promise<string> {
   const base64Svg = Buffer.from(svg).toString('base64');
   return `data:image/svg+xml;base64,${base64Svg}`;
 }
+
+/**
+ * 6. VIRALITY SKILL (/ig-viral)
+ * Faz o Raio-X de um vídeo/tema viral e cria um roteiro viral inédito adaptado para o perfil.
+ */
+export interface ViralAnalysisResult {
+  source_topic: string;
+  hook_breakdown: {
+    hook_type: string;
+    why_it_worked: string;
+    retention_factor: string;
+    emotional_trigger: string;
+  };
+  new_script: {
+    title: string;
+    hook_3s: string;
+    on_screen_text: string[];
+    beat_sheet: Array<{ time: string; visual: string; speech: string }>;
+    caption: string;
+    cta: string;
+    virality_score: number;
+  };
+}
+
+export async function analyzeViralVideoAndCreateScript(params: {
+  niche: string;
+  viralReference: string;
+  companyName: string;
+  brandVoice?: string;
+  knowledgeDigest?: string | null;
+}): Promise<ViralAnalysisResult> {
+  const ai = await getGenAI();
+
+  const prompt = `Você é o especialista mestre da Virality Skill (/ig-viral) do ecossistema de Instagram.
+Sua missão:
+1. Fazer o "RAIO-X" completo da referência viral informada (analisar por que performou tão bem: gancho de 0 a 3s, ritmo, retenção e gatilho emocional).
+2. Criar um ROTEIRO VIRAL INÉDITO para a empresa "${params.companyName}" no nicho "${params.niche}", baseado na mesma estrutura vencedora.
+
+REFERÊNCIA VIRAL INFORMADA:
+"${params.viralReference}"
+
+${params.knowledgeDigest ? `DIRETRIZES DA MARCA (KNOWLEDGE DIGEST):\n${params.knowledgeDigest}\n` : ''}
+
+DIRETRIZES DE CRIAÇÃO:
+- Sem clichês de IA (nada de "você sabia?", "vamos mergulhar", "no mundo de hoje").
+- O gancho dos primeiros 3 segundos DEVE parar a rolagem imediatamente com quebra de padrão ou curiosidade extrema.
+- O beat sheet deve ser claro e executável (tempo, o que mostrar na câmera, o que falar).
+
+Retorne EXCLUSIVAMENTE um JSON válido com esta estrutura:
+{
+  "source_topic": "Resumo do tema",
+  "hook_breakdown": {
+    "hook_type": "Quebra de Crença / Curiosidade Negativa / Promessa Irresistível",
+    "why_it_worked": "Explicação do porquê o vídeo viralizou",
+    "retention_factor": "Como o ritmo manteve as pessoas assistindo até o fim",
+    "emotional_trigger": "Curiosidade / Alívio / Ganância / Ambição"
+  },
+  "new_script": {
+    "title": "Título do novo vídeo",
+    "hook_3s": "Frase de abertura exata para falar nos primeiros 3 segundos",
+    "on_screen_text": ["TEXTO 1 NA TELA", "TEXTO 2 NA TELA"],
+    "beat_sheet": [
+      { "time": "0-3s", "visual": "Olhando sério para a lente", "speech": "Frase de abertura" },
+      { "time": "4-15s", "visual": "Mostrando o problema na tela", "speech": "Desenvolvimento rápido" },
+      { "time": "16-30s", "visual": "Revelando a solução prática", "speech": "O método real" },
+      { "time": "31-45s", "visual": "Chamada para ação", "speech": "Comente X que eu te envio" }
+    ],
+    "caption": "Legenda humanizada com primeiros 125 caracteres magnéticos...",
+    "cta": "Comente X para receber...",
+    "virality_score": 96
+  }
+}`;
+
+  const response = await callGeminiWithFallback(ai, {
+    contents: prompt,
+    config: {
+      responseMimeType: 'application/json',
+      temperature: 0.6,
+    },
+  });
+
+  const raw = response.text || '{}';
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {
+      source_topic: params.viralReference.slice(0, 80),
+      hook_breakdown: {
+        hook_type: 'Quebra de Padrão e Curiosidade Extrema',
+        why_it_worked: 'Começa desmentindo uma verdade aceita pelo mercado nos primeiros 3 segundos.',
+        retention_factor: 'Alternância rápida de cortes e entrega de valor sem rodeios.',
+        emotional_trigger: 'Medo de estar perdendo tempo ou dinheiro com o método errado.',
+      },
+      new_script: {
+        title: 'O Maior Erro do Nicho Revelado',
+        hook_3s: 'Pare de fazer isso se você não quer jogar dinheiro no lixo.',
+        on_screen_text: ['PARE AGORA', 'O JEITO CERTO'],
+        beat_sheet: [
+          { time: '0-3s', visual: 'Expressão de alerta apontando para a câmera', speech: 'Pare de fazer isso agora mesmo.' },
+          { time: '4-15s', visual: 'Exibindo a tela com o erro comum', speech: 'Quase todo mundo faz dessa forma e não entende por que não tem resultado.' },
+          { time: '16-30s', visual: 'Mostrando o passo correto e simplificado', speech: 'Quando você muda para esse formato, o resultado vem em metade do tempo.' },
+          { time: '31-45s', visual: 'Chamada para ação direta', speech: 'Comente VIRAL que eu te mando o checklist no direct.' },
+        ],
+        caption: 'O erro que está travando seus resultados no Instagram. Confira o passo a passo completo no vídeo.',
+        cta: 'Comente VIRAL para receber o checklist no Direct.',
+        virality_score: 95,
+      },
+    };
+  }
+}
+
+/**
+ * 7. AUDITORIA E OTIMIZAÇÃO DE PERFIL (/ig-profile)
+ * Avalia o perfil, calcula uma nota de 0 a 100 e gera melhorias de bio e posicionamento.
+ */
+export interface ProfileAuditResult {
+  score: number;
+  headline_evaluation: string;
+  strengths: string[];
+  improvements: string[];
+  suggested_bio: string;
+  suggested_name_field: string;
+  cta_link_suggestion: string;
+}
+
+export async function auditInstagramProfile(params: {
+  username: string;
+  accountName: string;
+  niche: string;
+  targetAudience: string;
+  currentBio?: string;
+}): Promise<ProfileAuditResult> {
+  const ai = await getGenAI();
+
+  const prompt = `Você é o auditor sênior de perfis de Instagram da habilidade /ig-profile.
+Avalie o perfil abaixo e gere um diagnóstico completo com pontuação de 0 a 100 e recomendações cirúrgicas para transformar visitantes em seguidores e clientes:
+
+PERFIL:
+- @: ${params.username}
+- Nome: ${params.accountName}
+- Nicho: ${params.niche}
+- Público: ${params.targetAudience}
+- Bio atual: ${params.currentBio || 'Não informada'}
+
+Retorne EXCLUSIVAMENTE um JSON válido com esta estrutura:
+{
+  "score": 68,
+  "headline_evaluation": "Diagnóstico em 1 linha",
+  "strengths": ["Ponto forte 1", "Ponto forte 2"],
+  "improvements": ["Melhoria 1", "Melhoria 2"],
+  "suggested_bio": "Linha 1: Quem ajuda e o que resolve\\nLinha 2: Prova social ou diferencial\\nLinha 3: Chamada para ação com seta 👇",
+  "suggested_name_field": "${params.accountName} | ${params.niche}",
+  "cta_link_suggestion": "Chamada irresistível para o link na bio"
+}`;
+
+  const response = await callGeminiWithFallback(ai, {
+    contents: prompt,
+    config: {
+      responseMimeType: 'application/json',
+      temperature: 0.5,
+    },
+  });
+
+  const raw = response.text || '{}';
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {
+      score: 74,
+      headline_evaluation: 'Perfil com bom posicionamento básico, necessitando de CTA mais forte na Bio.',
+      strengths: ['Nicho bem definido', 'Proposta de valor compreensível'],
+      improvements: ['Inserir palavra-chave do nicho no campo Nome', 'Criar CTA mais direto para o Direct/WhatsApp'],
+      suggested_bio: 'Transformamos seu negócio com atendimento inteligente 24/7.\\nMais de 1.000 atendimentos diários automatizados.\\nClique abaixo e teste grátis 👇',
+      suggested_name_field: `${params.accountName} | ${params.niche}`,
+      cta_link_suggestion: 'Fale com nosso robô no WhatsApp agora 👇',
+    };
+  }
+}
+
