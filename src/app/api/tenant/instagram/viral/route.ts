@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
 import { requireUser, getTenantForUser } from '@/lib/auth';
-import { analyzeViralVideoAndCreateScript } from '@/lib/ai/instagram-agent';
+import { analyzeViralVideoAndCreateScript, formatAIError } from '@/lib/ai/instagram-agent';
 
 export async function POST(req: NextRequest) {
   try {
@@ -36,8 +36,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, analysis });
   } catch (err: any) {
     console.error('[API Instagram Viral POST]', err);
+    const cleanError = formatAIError(err).message;
     return NextResponse.json(
-      { error: err?.message || 'Erro ao processar análise da Virality Skill' },
+      { error: cleanError },
       { status: 500 }
     );
   }

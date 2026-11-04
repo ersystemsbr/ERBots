@@ -12,11 +12,44 @@ import { getGeminiApiKey } from './gemini';
  */
 
 const GEMINI_MODELS = [
-  'gemini-3.8-flash',
   'gemini-3.5-flash',
+  'gemini-3.6-flash',
+  'gemini-3.1-flash-lite',
   'gemini-3.5-flash-lite',
+  'gemini-3.8-flash',
   'gemini-flash-latest',
 ];
+
+export function formatAIError(err: any): Error {
+  const msg = String(err?.message || '');
+  if (
+    msg.includes('503') ||
+    msg.toLowerCase().includes('high demand') ||
+    msg.includes('UNAVAILABLE') ||
+    err?.status === 503 ||
+    err?.code === 503
+  ) {
+    return new Error(
+      'Os servidores de IA estão com alta demanda momentânea. Tentamos modelos alternativos automaticamente; por favor, aguarde alguns instantes e tente novamente.'
+    );
+  }
+  if (
+    msg.includes('429') ||
+    msg.toLowerCase().includes('quota') ||
+    msg.includes('RESOURCE_EXHAUSTED') ||
+    err?.status === 429 ||
+    err?.code === 429
+  ) {
+    return new Error('Limite temporário de requisições atingido. Por favor, aguarde alguns segundos.');
+  }
+  try {
+    const parsed = JSON.parse(msg);
+    if (parsed?.error?.message) {
+      return new Error(parsed.error.message);
+    }
+  } catch {}
+  return err instanceof Error ? err : new Error(msg || 'Erro inesperado no motor de inteligência artificial.');
+}
 
 async function getGenAI(): Promise<GoogleGenAI> {
   let apiKey = process.env.GEMINI_API_KEY || '';
@@ -40,14 +73,11 @@ async function callGeminiWithFallback(ai: GoogleGenAI, config: any): Promise<any
     } catch (err: any) {
       lastErr = err;
       console.warn(`[InstagramAgent] Falha no modelo ${model}:`, err?.message || err);
-      const msg = String(err?.message || '').toLowerCase();
-      if (err?.status === 404 || msg.includes('not found') || msg.includes('no longer available') || msg.includes('not supported')) {
-        continue;
-      }
-      throw err;
+      // Sempre tenta o próximo modelo da lista para garantir resiliência contra 503, 429, 404, etc.
+      continue;
     }
   }
-  throw lastErr || new Error('Nenhum modelo Gemini disponível no momento.');
+  throw formatAIError(lastErr);
 }
 
 export interface BrandKnowledgeInput {

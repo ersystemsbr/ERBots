@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
 import { requireUser, getTenantForUser } from '@/lib/auth';
-import { generateViralPost, generatePostImage } from '@/lib/ai/instagram-agent';
+import { generateViralPost, generatePostImage, formatAIError } from '@/lib/ai/instagram-agent';
 import { sendTextMessage, normalizeBrPhone } from '@/lib/evolution';
 
 export async function POST(req: NextRequest) {
@@ -152,8 +152,9 @@ ${postData.caption.slice(0, 240)}...
     });
   } catch (err: any) {
     console.error('[API Instagram Generate POST]', err);
+    const cleanError = formatAIError(err).message;
     return NextResponse.json(
-      { error: err?.message || 'Erro ao gerar postagem de Instagram' },
+      { error: cleanError },
       { status: 500 }
     );
   }

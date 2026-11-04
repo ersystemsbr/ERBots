@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
 import { requireUser, getTenantForUser } from '@/lib/auth';
-import { generateWeeklyPlan } from '@/lib/ai/instagram-agent';
+import { generateWeeklyPlan, formatAIError } from '@/lib/ai/instagram-agent';
 
 export async function POST(req: NextRequest) {
   try {
@@ -36,8 +36,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, plan });
   } catch (err: any) {
     console.error('[API Instagram Plan POST]', err);
+    const cleanError = formatAIError(err).message;
     return NextResponse.json(
-      { error: err?.message || 'Erro ao gerar planejamento semanal' },
+      { error: cleanError },
       { status: 500 }
     );
   }

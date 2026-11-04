@@ -142,6 +142,33 @@ interface ProfileAudit {
   cta_link_suggestion: string;
 }
 
+function cleanErrorMessage(raw: any, fallback = 'Ocorreu um erro ao processar.'): string {
+  if (!raw) return fallback;
+  const str = typeof raw === 'string' ? raw : raw?.error || raw?.message || '';
+  if (!str) return fallback;
+
+  if (typeof str === 'string' && str.trim().startsWith('{')) {
+    try {
+      const parsed = JSON.parse(str);
+      if (parsed?.error?.message) {
+        return cleanErrorMessage(parsed.error.message, fallback);
+      }
+      if (parsed?.message) {
+        return cleanErrorMessage(parsed.message, fallback);
+      }
+    } catch {}
+  }
+
+  if (str.includes('503') || str.toLowerCase().includes('high demand') || str.includes('UNAVAILABLE')) {
+    return 'Os servidores de IA do Google estão com alta demanda temporária. O sistema já tenta modelos alternativos automaticamente; por favor, aguarde alguns instantes e tente novamente.';
+  }
+  if (str.includes('429') || str.toLowerCase().includes('quota') || str.includes('resource_exhausted')) {
+    return 'Limite temporário de requisições atingido. Por favor, aguarde alguns segundos.';
+  }
+
+  return str;
+}
+
 export default function InstagramAgentManager() {
   const [loading, setLoading] = useState(true);
   const [hasAccess, setHasAccess] = useState(true);
@@ -243,6 +270,34 @@ export default function InstagramAgentManager() {
     setTimeout(() => setCopiedKey(null), 2500);
   };
 
+  const handleToggleApprovalMode = async () => {
+    const newMode: 'whatsapp_required' | 'auto_scheduled' =
+      formData.approval_mode === 'auto_scheduled' ? 'whatsapp_required' : 'auto_scheduled';
+    const updatedFormData = { ...formData, approval_mode: newMode };
+    setFormData(updatedFormData);
+    try {
+      const res = await authFetch('/api/tenant/instagram/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedFormData),
+      });
+      if (res.ok) {
+        setFeedbackMsg({
+          type: 'success',
+          text:
+            newMode === 'auto_scheduled'
+              ? '⚡ Modo Piloto Automático ativado! As publicações serão programadas automaticamente.'
+              : '📱 Modo Copiloto ativado! Os posts criados serão enviados ao seu WhatsApp para você aprovar.',
+        });
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setFeedbackMsg({ type: 'error', text: cleanErrorMessage(err, 'Erro ao alternar modo de automação.') });
+      }
+    } catch {
+      setFeedbackMsg({ type: 'error', text: 'Erro de conexão ao alterar modo de automação.' });
+    }
+  };
+
   const handleGeneratePost = async () => {
     try {
       setGeneratingPost(true);
@@ -262,11 +317,11 @@ export default function InstagramAgentManager() {
           text: `Publicação gerada com sucesso pela IA! Gancho com nota ${data.details?.hook_score || 94}/100.`,
         });
       } else {
-        const err = await res.json();
-        setFeedbackMsg({ type: 'error', text: err.error || 'Falha ao gerar post com a IA.' });
+        const err = await res.json().catch(() => ({}));
+        setFeedbackMsg({ type: 'error', text: cleanErrorMessage(err, 'Falha ao gerar post com a IA.') });
       }
-    } catch {
-      setFeedbackMsg({ type: 'error', text: 'Erro de conexão ao gerar o post.' });
+    } catch (e: any) {
+      setFeedbackMsg({ type: 'error', text: cleanErrorMessage(e, 'Erro de conexão ao gerar o post.') });
     } finally {
       setGeneratingPost(false);
     }
@@ -290,11 +345,11 @@ export default function InstagramAgentManager() {
         setViralResult(data.analysis);
         setFeedbackMsg({ type: 'success', text: 'Raio-X concluído! Roteiro viral inédito gerado.' });
       } else {
-        const err = await res.json();
-        setFeedbackMsg({ type: 'error', text: err.error || 'Erro ao analisar referência viral.' });
+        const err = await res.json().catch(() => ({}));
+        setFeedbackMsg({ type: 'error', text: cleanErrorMessage(err, 'Erro ao analisar referência viral.') });
       }
-    } catch {
-      setFeedbackMsg({ type: 'error', text: 'Erro ao conectar à IA para dissecação viral.' });
+    } catch (e: any) {
+      setFeedbackMsg({ type: 'error', text: cleanErrorMessage(e, 'Erro ao conectar à IA para dissecação viral.') });
     } finally {
       setGeneratingViral(false);
     }
@@ -310,11 +365,11 @@ export default function InstagramAgentManager() {
         setWeeklyPlan(data.plan || []);
         setFeedbackMsg({ type: 'success', text: 'Grade de 7 dias criada nos 4 pilares estratégicos!' });
       } else {
-        const err = await res.json();
-        setFeedbackMsg({ type: 'error', text: err.error || 'Erro ao gerar planejamento semanal.' });
+        const err = await res.json().catch(() => ({}));
+        setFeedbackMsg({ type: 'error', text: cleanErrorMessage(err, 'Erro ao gerar planejamento semanal.') });
       }
-    } catch {
-      setFeedbackMsg({ type: 'error', text: 'Erro ao gerar planejamento semanal.' });
+    } catch (e: any) {
+      setFeedbackMsg({ type: 'error', text: cleanErrorMessage(e, 'Erro ao gerar planejamento semanal.') });
     } finally {
       setGeneratingPlan(false);
     }
@@ -334,11 +389,11 @@ export default function InstagramAgentManager() {
         setAuditResult(data.audit);
         setFeedbackMsg({ type: 'success', text: `Diagnóstico pronto! Nota do perfil: ${data.audit.score}/100.` });
       } else {
-        const err = await res.json();
-        setFeedbackMsg({ type: 'error', text: err.error || 'Erro ao auditar perfil.' });
+        const err = await res.json().catch(() => ({}));
+        setFeedbackMsg({ type: 'error', text: cleanErrorMessage(err, 'Erro ao auditar perfil.') });
       }
-    } catch {
-      setFeedbackMsg({ type: 'error', text: 'Erro ao conectar com a IA.' });
+    } catch (e: any) {
+      setFeedbackMsg({ type: 'error', text: cleanErrorMessage(e, 'Erro ao conectar com a IA.') });
     } finally {
       setAuditingProfile(false);
     }
@@ -359,11 +414,11 @@ export default function InstagramAgentManager() {
         setGeneratedComments(data.comments || []);
         setFeedbackMsg({ type: 'success', text: '3 opções de comentários magnéticos geradas!' });
       } else {
-        const err = await res.json();
-        setFeedbackMsg({ type: 'error', text: err.error || 'Erro ao gerar comentários.' });
+        const err = await res.json().catch(() => ({}));
+        setFeedbackMsg({ type: 'error', text: cleanErrorMessage(err, 'Erro ao gerar comentários.') });
       }
-    } catch {
-      setFeedbackMsg({ type: 'error', text: 'Erro de conexão.' });
+    } catch (e: any) {
+      setFeedbackMsg({ type: 'error', text: cleanErrorMessage(e, 'Erro de conexão.') });
     } finally {
       setGeneratingComments(false);
     }
@@ -378,15 +433,15 @@ export default function InstagramAgentManager() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'publish', postId }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setFeedbackMsg({ type: 'success', text: 'Publicação enviada com sucesso para o Instagram!' });
         loadData();
       } else {
-        setFeedbackMsg({ type: 'error', text: data.error || 'Falha ao publicar via Meta API.' });
+        setFeedbackMsg({ type: 'error', text: cleanErrorMessage(data, 'Falha ao publicar via Meta API.') });
       }
-    } catch {
-      setFeedbackMsg({ type: 'error', text: 'Erro ao publicar na Meta.' });
+    } catch (e: any) {
+      setFeedbackMsg({ type: 'error', text: cleanErrorMessage(e, 'Erro ao publicar na Meta.') });
     } finally {
       setPublishingId(null);
     }
@@ -402,8 +457,8 @@ export default function InstagramAgentManager() {
           setSelectedPost(null);
         }
       }
-    } catch {
-      setFeedbackMsg({ type: 'error', text: 'Erro ao remover post.' });
+    } catch (e: any) {
+      setFeedbackMsg({ type: 'error', text: cleanErrorMessage(e, 'Erro ao remover post.') });
     }
   };
 
@@ -420,9 +475,11 @@ export default function InstagramAgentManager() {
         setFeedbackMsg({ type: 'success', text: 'Configurações de marca salvas com sucesso!' });
         loadData();
       } else {
-        const err = await res.json();
-        setFeedbackMsg({ type: 'error', text: err.error || 'Erro ao salvar configurações.' });
+        const err = await res.json().catch(() => ({}));
+        setFeedbackMsg({ type: 'error', text: cleanErrorMessage(err, 'Erro ao salvar configurações.') });
       }
+    } catch (e: any) {
+      setFeedbackMsg({ type: 'error', text: cleanErrorMessage(e, 'Erro ao salvar configurações.') });
     } finally {
       setLoading(false);
     }
@@ -450,9 +507,11 @@ export default function InstagramAgentManager() {
           text: `Meta Graph API conectada com sucesso (@${data.username || metaBusinessId})! Publicação direta liberada.`,
         });
       } else {
-        const err = await res.json();
-        setFeedbackMsg({ type: 'error', text: err.error || 'Erro ao autenticar com a Meta.' });
+        const err = await res.json().catch(() => ({}));
+        setFeedbackMsg({ type: 'error', text: cleanErrorMessage(err, 'Erro ao autenticar com a Meta.') });
       }
+    } catch (e: any) {
+      setFeedbackMsg({ type: 'error', text: cleanErrorMessage(e, 'Erro de conexão com a Meta.') });
     } finally {
       setIsConnectingMeta(false);
     }
@@ -520,12 +579,32 @@ export default function InstagramAgentManager() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Toggle Rápido Piloto Automático vs Copiloto */}
+          <button
+            onClick={handleToggleApprovalMode}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border transition text-xs font-semibold shadow-sm ${
+              formData.approval_mode === 'auto_scheduled'
+                ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25'
+                : 'bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20'
+            }`}
+            title="Clique para alternar entre Copiloto (Aprovação Zap) e Piloto Automático"
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${
+                formData.approval_mode === 'auto_scheduled' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+              }`}
+            />
+            <span>
+              {formData.approval_mode === 'auto_scheduled' ? '⚡ Piloto Automático: LIGADO' : '📱 Modo Copiloto (Aprovação Zap)'}
+            </span>
+          </button>
+
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300">
             <span
-              className={`w-2 h-2 rounded-full ${isMetaConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}
+              className={`w-2 h-2 rounded-full ${isMetaConnected ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`}
             />
-            <span>{isMetaConnected ? 'Meta API Ativa' : 'Modo Copiloto (Pronto para Uso)'}</span>
+            <span>{isMetaConnected ? 'Meta API Ativa' : 'Publicação Manual / Zap'}</span>
           </div>
         </div>
       </div>
@@ -556,9 +635,14 @@ export default function InstagramAgentManager() {
 
         <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between">
           <div>
-            <span className="text-xs text-slate-400 block font-medium">Qualidade de Gancho</span>
-            <div className="text-2xl font-extrabold text-white mt-1">94% Score</div>
-            <span className="text-[11px] text-purple-400 mt-0.5 block">Filtro anti-clichês de IA ativo</span>
+            <span className="text-xs text-slate-400 block font-medium">Equipe de Conteúdo IA</span>
+            <div className="text-2xl font-extrabold text-white mt-1 flex items-center gap-1.5">
+              <span>11 Skills</span>
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                Ativas
+              </span>
+            </div>
+            <span className="text-[11px] text-purple-400 mt-0.5 block">Ganchos, Roteiros, Bio, Social Selling</span>
           </div>
           <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 shrink-0">
             <Flame className="w-5 h-5" />

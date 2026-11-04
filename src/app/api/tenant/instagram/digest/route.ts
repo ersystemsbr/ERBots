@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
 import { requireUser, getTenantForUser } from '@/lib/auth';
-import { generateKnowledgeDigest } from '@/lib/ai/instagram-agent';
+import { generateKnowledgeDigest, formatAIError } from '@/lib/ai/instagram-agent';
 
 export async function POST(req: NextRequest) {
   try {
@@ -55,8 +55,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, digest, updated_at: now });
   } catch (err: any) {
     console.error('[API Instagram Digest POST]', err);
+    const cleanError = formatAIError(err).message;
     return NextResponse.json(
-      { error: err?.message || 'Erro ao gerar Guia de Voz e Knowledge Digest' },
+      { error: cleanError },
       { status: 500 }
     );
   }

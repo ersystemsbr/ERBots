@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
 import { requireUser, getTenantForUser } from '@/lib/auth';
-import { generateStrategicComments } from '@/lib/ai/instagram-agent';
+import { generateStrategicComments, formatAIError } from '@/lib/ai/instagram-agent';
 
 export async function POST(req: NextRequest) {
   try {
@@ -34,6 +34,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, comments });
   } catch (err: any) {
     console.error('[API Instagram Comments POST]', err);
-    return NextResponse.json({ error: err?.message || 'Erro ao gerar comentários' }, { status: 500 });
+    const cleanError = formatAIError(err).message;
+    return NextResponse.json({ error: cleanError }, { status: 500 });
   }
 }
