@@ -33,6 +33,9 @@ import {
   Smartphone,
   ChevronDown,
   Trash2,
+  Globe,
+  User,
+  Link as LinkIcon,
 } from 'lucide-react';
 
 export function InstagramIcon({ className = 'w-5 h-5' }: { className?: string }) {
@@ -59,6 +62,8 @@ interface InstagramAccount {
   approval_timeout_hours: number;
   timeout_action: 'auto_publish' | 'skip';
   preferred_post_time: string;
+  whatsapp_delivery_time?: string;
+  image_aspect_ratio?: '4:5' | '9:16' | '1:1';
   auto_generate_daily: boolean;
   is_active: boolean;
   instagram_business_id?: string;
@@ -191,6 +196,7 @@ export default function InstagramAgentManager() {
   // Inputs
   const [topicHint, setTopicHint] = useState('');
   const [postFormat, setPostFormat] = useState<'single_image' | 'reel_script' | 'carousel'>('single_image');
+  const [viralMode, setViralMode] = useState<'niche_search' | 'competitor_profile' | 'video_link_or_text'>('niche_search');
   const [viralReferenceInput, setViralReferenceInput] = useState('');
   const [viralResult, setViralResult] = useState<ViralAnalysis | null>(null);
   const [currentBioInput, setCurrentBioInput] = useState('');
@@ -218,6 +224,9 @@ export default function InstagramAgentManager() {
     brand_voice: 'Profissional, acolhedor e focado em benefícios práticos',
     visual_style: 'Fotografia realista, iluminação de estúdio limpa, cores vivas e estética profissional',
     approval_mode: 'whatsapp_required' as 'whatsapp_required' | 'auto_scheduled',
+    whatsapp_delivery_time: '23:00',
+    preferred_post_time: '05:30',
+    image_aspect_ratio: '4:5' as '4:5' | '9:16' | '1:1',
   });
 
   const loadData = async () => {
@@ -241,6 +250,9 @@ export default function InstagramAgentManager() {
             brand_voice: data.account.brand_voice || '',
             visual_style: data.account.visual_style || '',
             approval_mode: data.account.approval_mode || 'whatsapp_required',
+            whatsapp_delivery_time: data.account.whatsapp_delivery_time || '23:00',
+            preferred_post_time: data.account.preferred_post_time || '05:30',
+            image_aspect_ratio: data.account.image_aspect_ratio || '4:5',
           });
         }
       }
@@ -336,7 +348,11 @@ export default function InstagramAgentManager() {
       const res = await authFetch('/api/tenant/instagram/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topicHint, format: postFormat }),
+        body: JSON.stringify({
+          topicHint,
+          format: postFormat,
+          aspectRatio: formData.image_aspect_ratio,
+        }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -360,7 +376,13 @@ export default function InstagramAgentManager() {
 
   const handleGenerateViral = async () => {
     if (!viralReferenceInput.trim()) {
-      setFeedbackMsg({ type: 'error', text: 'Informe um tema, gancho ou link de referência viral.' });
+      const msg =
+        viralMode === 'niche_search'
+          ? 'Informe a palavra-chave ou nicho para pesquisar tendências.'
+          : viralMode === 'competitor_profile'
+          ? 'Informe o @ do perfil de sucesso para dissecação.'
+          : 'Informe o link ou tema do vídeo viral de referência.';
+      setFeedbackMsg({ type: 'error', text: msg });
       return;
     }
     try {
@@ -369,7 +391,7 @@ export default function InstagramAgentManager() {
       const res = await authFetch('/api/tenant/instagram/viral', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ viralReference: viralReferenceInput }),
+        body: JSON.stringify({ viralReference: viralReferenceInput, mode: viralMode }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -640,47 +662,6 @@ export default function InstagramAgentManager() {
         </div>
       </div>
 
-      {/* Cards de Métricas e Ciclo de Atração */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between">
-          <div>
-            <span className="text-xs text-slate-400 block font-medium">Publicações Criadas</span>
-            <div className="text-2xl font-extrabold text-white mt-1">{posts.length} posts</div>
-            <span className="text-[11px] text-emerald-400 mt-0.5 block">Prontas para copiar ou publicar</span>
-          </div>
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
-            <Sparkles className="w-5 h-5" />
-          </div>
-        </div>
-
-        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between">
-          <div>
-            <span className="text-xs text-slate-400 block font-medium">Ciclo de Conversão</span>
-            <div className="text-2xl font-extrabold text-white mt-1">Instagram ➔ Zap</div>
-            <span className="text-[11px] text-sky-400 mt-0.5 block">CTAs automáticos para o ERBots</span>
-          </div>
-          <div className="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 shrink-0">
-            <MessageSquare className="w-5 h-5" />
-          </div>
-        </div>
-
-        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 sm:p-5 flex items-center justify-between">
-          <div>
-            <span className="text-xs text-slate-400 block font-medium">Equipe de Conteúdo IA</span>
-            <div className="text-2xl font-extrabold text-white mt-1 flex items-center gap-1.5">
-              <span>11 Skills</span>
-              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                Ativas
-              </span>
-            </div>
-            <span className="text-[11px] text-purple-400 mt-0.5 block">Ganchos, Roteiros, Bio, Social Selling</span>
-          </div>
-          <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 shrink-0">
-            <Flame className="w-5 h-5" />
-          </div>
-        </div>
-      </div>
-
       {/* Banner Executivo de Automação Diária no WhatsApp */}
       <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-emerald-950/40 via-slate-900 to-indigo-950/30 border border-emerald-500/30 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xl">
         <div className="space-y-1">
@@ -829,6 +810,60 @@ export default function InstagramAgentManager() {
                 </div>
               </div>
 
+              {/* Formato / Proporção da Imagem */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-semibold text-slate-300">Formato da Imagem / Arte</label>
+                  <span className="text-[10px] text-emerald-400 font-semibold">
+                    {formData.image_aspect_ratio === '4:5'
+                      ? '4:5 • Retrato Feed (Mais Usado)'
+                      : formData.image_aspect_ratio === '9:16'
+                      ? '9:16 • Vertical Stories/Reels'
+                      : '1:1 • Quadrado Tradicional'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, image_aspect_ratio: '4:5' })}
+                    className={`py-2 px-2 rounded-xl border text-center transition flex flex-col items-center justify-center gap-0.5 ${
+                      formData.image_aspect_ratio === '4:5'
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-850'
+                    }`}
+                  >
+                    <span className="text-xs">4:5 Retrato</span>
+                    <span className="text-[10px] text-slate-500">1080x1350 (Feed)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, image_aspect_ratio: '9:16' })}
+                    className={`py-2 px-2 rounded-xl border text-center transition flex flex-col items-center justify-center gap-0.5 ${
+                      formData.image_aspect_ratio === '9:16'
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-850'
+                    }`}
+                  >
+                    <span className="text-xs">9:16 Vertical</span>
+                    <span className="text-[10px] text-slate-500">1080x1920 (Reels)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, image_aspect_ratio: '1:1' })}
+                    className={`py-2 px-2 rounded-xl border text-center transition flex flex-col items-center justify-center gap-0.5 ${
+                      formData.image_aspect_ratio === '1:1'
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-850'
+                    }`}
+                  >
+                    <span className="text-xs">1:1 Quadrado</span>
+                    <span className="text-[10px] text-slate-500">1080x1080</span>
+                  </button>
+                </div>
+              </div>
+
               {/* Campo de Tema / Ideia */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
@@ -940,11 +975,19 @@ export default function InstagramAgentManager() {
 
                   {/* Imagem ou Roteiro Visual */}
                   {selectedPost.media_urls?.[0] ? (
-                    <div className="relative aspect-square w-full bg-slate-900 overflow-hidden flex items-center justify-center">
+                    <div
+                      className={`relative w-full bg-slate-900 overflow-hidden flex items-center justify-center ${
+                        formData.image_aspect_ratio === '9:16'
+                          ? 'aspect-[9/16] max-h-[500px]'
+                          : formData.image_aspect_ratio === '4:5'
+                          ? 'aspect-[4/5] max-h-[460px]'
+                          : 'aspect-square max-h-[380px]'
+                      }`}
+                    >
                       <img
                         src={selectedPost.media_urls[0]}
                         alt={selectedPost.hook_title}
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-contain"
                       />
                     </div>
                   ) : (
@@ -1106,13 +1149,82 @@ export default function InstagramAgentManager() {
               </span>
             </div>
 
+            {/* Seletor de Modo: Nicho, Concorrente ou Vídeo */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setViralMode('niche_search')}
+                className={`p-3 rounded-xl border flex flex-col items-start gap-1 transition text-left ${
+                  viralMode === 'niche_search'
+                    ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 font-bold'
+                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800/60'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Globe className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs font-bold text-white">Pesquisar Nicho</span>
+                </div>
+                <span className="text-[11px] text-slate-400 font-normal">
+                  Tendências virais do seu nicho no Instagram &amp; Web
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setViralMode('competitor_profile')}
+                className={`p-3 rounded-xl border flex flex-col items-start gap-1 transition text-left ${
+                  viralMode === 'competitor_profile'
+                    ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 font-bold'
+                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800/60'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <User className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs font-bold text-white">@ Perfil de Sucesso</span>
+                </div>
+                <span className="text-[11px] text-slate-400 font-normal">
+                  Dissecar e modelar estratégias de concorrentes
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setViralMode('video_link_or_text')}
+                className={`p-3 rounded-xl border flex flex-col items-start gap-1 transition text-left ${
+                  viralMode === 'video_link_or_text'
+                    ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 font-bold'
+                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800/60'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <LinkIcon className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs font-bold text-white">Link ou Vídeo</span>
+                </div>
+                <span className="text-[11px] text-slate-400 font-normal">
+                  Raio-X de link de Reels ou roteiro específico
+                </span>
+              </button>
+            </div>
+
             <div className="space-y-2">
-              <label className="text-xs font-semibold text-slate-300">Tema ou Ideia do Vídeo Viral de Referência</label>
+              <label className="text-xs font-semibold text-slate-300">
+                {viralMode === 'niche_search'
+                  ? 'Nicho ou Palavra-chave para Pesquisar Tendências Virais'
+                  : viralMode === 'competitor_profile'
+                  ? '@ do Perfil de Referência ou Concorrente para Dissecar'
+                  : 'Link do Vídeo/Reels ou Transcrição/Tema'}
+              </label>
               <textarea
                 rows={3}
                 value={viralReferenceInput}
                 onChange={(e) => setViralReferenceInput(e.target.value)}
-                placeholder="Ex: Vídeo de um concorrente falando 'Pare de comer pão francês se você quer emagrecer', que bateu 500k visualizações..."
+                placeholder={
+                  viralMode === 'niche_search'
+                    ? 'Ex: hamburgueria artesanal, clínica de estética facial, advocacia trabalhista, energia solar, confeitaria...'
+                    : viralMode === 'competitor_profile'
+                    ? 'Ex: @perfil_referencia ou @concorrente_famoso'
+                    : 'Ex: Cole o link do Reels do Instagram (https://instagram.com/reel/...) ou descreva o roteiro do vídeo...'
+                }
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 transition resize-none"
               />
             </div>
@@ -1123,7 +1235,15 @@ export default function InstagramAgentManager() {
               className="py-3 px-6 rounded-xl font-bold text-sm bg-gradient-to-r from-amber-500 to-orange-400 hover:from-amber-400 hover:to-orange-300 text-slate-950 transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 disabled:opacity-50"
             >
               <Flame className={`w-4 h-4 ${generatingViral ? 'animate-spin' : ''}`} />
-              <span>{generatingViral ? 'Dissecando Gancho & Criando Roteiro...' : 'Fazer Raio-X & Criar Roteiro Viral'}</span>
+              <span>
+                {generatingViral
+                  ? 'Dissecando Gancho & Criando Roteiro...'
+                  : viralMode === 'niche_search'
+                  ? 'Pesquisar Tendências & Criar Roteiro Viral'
+                  : viralMode === 'competitor_profile'
+                  ? 'Dissecar Perfil & Criar Roteiro Superior'
+                  : 'Fazer Raio-X & Criar Roteiro Viral'}
+              </span>
             </button>
           </div>
 
@@ -1468,11 +1588,96 @@ export default function InstagramAgentManager() {
                 />
               </div>
 
+              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800">
+                <div>
+                  <label className="text-xs text-slate-300 font-semibold block mb-1">
+                    Envio no Zap 📱
+                  </label>
+                  <input
+                    type="time"
+                    value={formData.whatsapp_delivery_time}
+                    onChange={(e) => setFormData({ ...formData, whatsapp_delivery_time: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  />
+                  <span className="text-[10px] text-slate-500 mt-1 block">
+                    Horário que o robô envia no seu WhatsApp
+                  </span>
+                </div>
+
+                <div>
+                  <label className="text-xs text-slate-300 font-semibold block mb-1">
+                    Postar no Insta ⏰
+                  </label>
+                  <input
+                    type="time"
+                    value={formData.preferred_post_time}
+                    onChange={(e) => setFormData({ ...formData, preferred_post_time: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  />
+                  <span className="text-[10px] text-slate-500 mt-1 block">
+                    Horário agendado para o post ir ao ar
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5 pt-2 border-t border-slate-800">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs text-slate-300 font-semibold">Formato Padrão da Imagem</label>
+                  <span className="text-[10px] text-emerald-400 font-semibold">
+                    {formData.image_aspect_ratio === '4:5'
+                      ? '4:5 Retrato Feed (Mais Usado)'
+                      : formData.image_aspect_ratio === '9:16'
+                      ? '9:16 Vertical (Stories/Reels)'
+                      : '1:1 Quadrado Tradicional'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, image_aspect_ratio: '4:5' })}
+                    className={`py-2 px-2 rounded-xl border text-center transition flex flex-col items-center justify-center gap-0.5 ${
+                      formData.image_aspect_ratio === '4:5'
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-850'
+                    }`}
+                  >
+                    <span className="text-xs">4:5 Retrato</span>
+                    <span className="text-[10px] text-slate-500">1080x1350</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, image_aspect_ratio: '9:16' })}
+                    className={`py-2 px-2 rounded-xl border text-center transition flex flex-col items-center justify-center gap-0.5 ${
+                      formData.image_aspect_ratio === '9:16'
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-850'
+                    }`}
+                  >
+                    <span className="text-xs">9:16 Vertical</span>
+                    <span className="text-[10px] text-slate-500">1080x1920</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, image_aspect_ratio: '1:1' })}
+                    className={`py-2 px-2 rounded-xl border text-center transition flex flex-col items-center justify-center gap-0.5 ${
+                      formData.image_aspect_ratio === '1:1'
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-850'
+                    }`}
+                  >
+                    <span className="text-xs">1:1 Quadrado</span>
+                    <span className="text-[10px] text-slate-500">1080x1080</span>
+                  </button>
+                </div>
+              </div>
+
               <button
                 type="submit"
                 className="w-full py-2.5 rounded-xl font-bold text-xs bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition"
               >
-                Salvar Diretrizes de Marca
+                Salvar Diretrizes de Marca &amp; Horários
               </button>
             </form>
 

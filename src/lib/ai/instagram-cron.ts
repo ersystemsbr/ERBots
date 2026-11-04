@@ -44,6 +44,20 @@ export async function generateDailyPostForTenant(tenantId: string): Promise<Dail
   const dayOfWeek = nowBr.getDay();
   const rule = PILLAR_CONFIG.find((p) => p.day === dayOfWeek) || PILLAR_CONFIG[1];
 
+  // Desempacota formato da imagem (4:5, 9:16 ou 1:1) e horários customizados
+  let aspectRatio: '4:5' | '9:16' | '1:1' = '4:5';
+  let deliveryTime = '23:00';
+  let cleanVisualStyle = account.visual_style || '';
+
+  if (cleanVisualStyle.startsWith('{') && cleanVisualStyle.includes('"ratio"')) {
+    try {
+      const meta = JSON.parse(cleanVisualStyle);
+      if (meta.ratio) aspectRatio = meta.ratio;
+      if (meta.deliveryTime) deliveryTime = meta.deliveryTime;
+      if (meta.style) cleanVisualStyle = meta.style;
+    } catch {}
+  }
+
   // 3. Gera o conteúdo do post com o motor de IA
   const postData = await generateViralPost({
     companyName: account.account_name || tenant.name || 'Sua Empresa',
@@ -51,26 +65,27 @@ export async function generateDailyPostForTenant(tenantId: string): Promise<Dail
     format: rule.format,
     knowledgeDigest: account.brand_knowledge_digest,
     topicHint: rule.hint,
-    visualStyle: account.visual_style || undefined,
+    visualStyle: cleanVisualStyle || undefined,
   });
 
-  // 4. Gera a arte visual com padrão editorial de agência
+  // 4. Gera a arte visual com padrão editorial de agência no formato configurado (4:5, 9:16 ou 1:1)
   const imageUrl = await generatePostImage(postData.image_prompt, {
     hookTitle: postData.hook_title,
     companyName: account.account_name || tenant.name,
     username: account.account_username || undefined,
     niche: account.niche || undefined,
     categoryBadge: rule.pillar.toUpperCase(),
+    aspectRatio,
   });
 
   // 5. Configura agendamento e status
   const isApprovalRequired = account.approval_mode === 'whatsapp_required';
   const status = isApprovalRequired ? 'pending_approval' : 'scheduled';
 
-  const preferredTime = account.preferred_post_time || '18:00:00';
+  const preferredTime = account.preferred_post_time ? account.preferred_post_time.slice(0, 5) : '05:30';
   const [hours, minutes] = preferredTime.split(':').map(Number);
   const scheduledFor = new Date(nowBr);
-  scheduledFor.setHours(hours || 18, minutes || 0, 0, 0);
+  scheduledFor.setHours(hours ?? 5, minutes ?? 30, 0, 0);
   if (scheduledFor.getTime() <= Date.now()) {
     scheduledFor.setDate(scheduledFor.getDate() + 1);
   }
@@ -159,8 +174,8 @@ ${appUrl}/dashboard?tab=instagram&post=${createdPost.id}
 
 ━━━━━━━━━━━━━━━━━━━━━━
 👉 *Responda direto aqui no WhatsApp:*
-*1* ➔ Publicar agora no Instagram
-*2* ➔ Agendar para hoje às ${preferredTime.slice(0, 5)}
+*1* ➔ Publicar no Instagram (programado para às ${preferredTime})
+*2* ➔ Publicar imediatamente agora
 *3* ➔ Gerar outra opção de tema`;
       } else {
         msg = `⚡ *Post Diário Agendado no Piloto Automático!* (ERBots IA)

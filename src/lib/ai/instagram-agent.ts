@@ -421,12 +421,15 @@ Retorne EXCLUSIVAMENTE um array JSON com 7 objetos:
   }
 }
 
+export type ImageAspectRatio = '4:5' | '9:16' | '1:1';
+
 export interface PostImageOptions {
   hookTitle?: string;
   companyName?: string;
   username?: string;
   niche?: string;
   categoryBadge?: string;
+  aspectRatio?: ImageAspectRatio;
 }
 
 function escapeXml(str: string): string {
@@ -459,10 +462,22 @@ function wrapText(text: string, maxCharsPerLine = 30, maxLines = 3): string[] {
 }
 
 /**
- * 5. GERAÇÃO DE IMAGENS POR IA (Imagen 3 / Gemini com Design Executivo de Agência)
+ * 5. GERAÇÃO DE IMAGENS POR IA (Imagen 3 / Gemini com Formato Configurável: 4:5, 9:16 ou 1:1)
  */
 export async function generatePostImage(imagePrompt: string, options?: PostImageOptions): Promise<string> {
   const ai = await getGenAI();
+  const ratio = options?.aspectRatio || '4:5';
+  const width = 1080;
+  let height = 1350; // Padrão 4:5 (mais usado no Feed do Instagram hoje)
+  let imagenRatio = '3:4'; // Proporção mais próxima suportada no Imagen 3
+
+  if (ratio === '9:16') {
+    height = 1920;
+    imagenRatio = '9:16';
+  } else if (ratio === '1:1') {
+    height = 1080;
+    imagenRatio = '1:1';
+  }
 
   try {
     const response = await (ai.models as any).generateImages({
@@ -470,7 +485,7 @@ export async function generatePostImage(imagePrompt: string, options?: PostImage
       prompt: `${imagePrompt}, commercial advertising photography, perfect lighting, ultra-high resolution, 4k`,
       config: {
         numberOfImages: 1,
-        aspectRatio: '1:1',
+        aspectRatio: imagenRatio,
         outputMimeType: 'image/jpeg',
       },
     });
@@ -483,7 +498,7 @@ export async function generatePostImage(imagePrompt: string, options?: PostImage
     console.warn('[InstagramAgent] Imagen 3 indisponível ou cota excedida, fallback para card editorial de agência:', err?.message || err);
   }
 
-  // Fallback: Card de Design Editorial de Agência (padrão Instagram 1080x1080)
+  // Fallback: Card de Design Editorial de Agência no formato selecionado (4:5, 9:16 ou 1:1)
   const title = options?.hookTitle || 'Estratégia Prática para o Seu Negócio';
   const badge = escapeXml(options?.categoryBadge || 'ESTRATÉGIA PRÁTICA');
   const rawHandle = options?.username || options?.companyName || 'seu_negocio';
@@ -493,13 +508,23 @@ export async function generatePostImage(imagePrompt: string, options?: PostImage
   const titleSvgLines = lines
     .map(
       (line, i) =>
-        `<text x="0" y="${i * 68}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="56" font-weight="900" fill="${
+        `<text x="0" y="${i * 70}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="56" font-weight="900" fill="${
           i === 0 ? '#ffffff' : '#f8fafc'
         }" letter-spacing="-1">${escapeXml(line)}</text>`
     )
     .join('\n');
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
+  // Ajustes verticais de acordo com o formato da tela
+  const cardY = 460;
+  const cardHeight = ratio === '9:16' ? 760 : ratio === '4:5' ? 490 : 340;
+  const ctaY = height - 190;
+  const footerY = height - 85;
+
+  const point1Y = 75;
+  const point2Y = ratio === '1:1' ? 175 : 220;
+  const point3Y = ratio === '1:1' ? 275 : 365;
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
     <defs>
       <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
         <stop offset="0%" stop-color="#090d16" />
@@ -525,11 +550,11 @@ export async function generatePostImage(imagePrompt: string, options?: PostImage
       </linearGradient>
     </defs>
 
-    <rect width="1080" height="1080" fill="url(#bg)" />
-    <rect width="1080" height="1080" fill="url(#glowTop)" />
-    <rect width="1080" height="1080" fill="url(#glowBottom)" />
+    <rect width="${width}" height="${height}" fill="url(#bg)" />
+    <rect width="${width}" height="${height}" fill="url(#glowTop)" />
+    <rect width="${width}" height="${height}" fill="url(#glowBottom)" />
 
-    <rect x="44" y="44" width="992" height="992" rx="36" fill="none" stroke="#1e293b" stroke-width="2" />
+    <rect x="44" y="44" width="${width - 88}" height="${height - 88}" rx="36" fill="none" stroke="#1e293b" stroke-width="2" />
 
     <g transform="translate(84, 94)">
       <rect x="0" y="0" width="260" height="48" rx="24" fill="#10b981" fill-opacity="0.16" stroke="#10b981" stroke-opacity="0.45" stroke-width="1.5" />
@@ -539,35 +564,35 @@ export async function generatePostImage(imagePrompt: string, options?: PostImage
 
     <rect x="84" y="174" width="912" height="2" fill="url(#accentLine)" rx="1" />
 
-    <g transform="translate(84, 260)">
+    <g transform="translate(84, 250)">
       ${titleSvgLines}
     </g>
 
-    <g transform="translate(84, 480)">
-      <rect x="0" y="0" width="912" height="340" rx="28" fill="#0f172a" fill-opacity="0.88" stroke="#334155" stroke-width="1.5" />
+    <g transform="translate(84, ${cardY})">
+      <rect x="0" y="0" width="912" height="${cardHeight}" rx="28" fill="#0f172a" fill-opacity="0.88" stroke="#334155" stroke-width="1.5" />
       
-      <circle cx="50" cy="65" r="18" fill="#10b981" fill-opacity="0.2" stroke="#10b981" stroke-width="2" />
-      <text x="50" y="71" font-family="sans-serif" font-size="16" font-weight="900" fill="#34d399" text-anchor="middle">✓</text>
-      <text x="90" y="60" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="800" fill="#ffffff">01. O ERRO QUE TRAVA SEUS RESULTADOS</text>
-      <text x="90" y="88" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="17" font-weight="500" fill="#94a3b8">Fazer postagens sem gancho magnético e sem foco em atrair clientes.</text>
+      <circle cx="50" cy="${point1Y}" r="18" fill="#10b981" fill-opacity="0.2" stroke="#10b981" stroke-width="2" />
+      <text x="50" y="${point1Y + 6}" font-family="sans-serif" font-size="16" font-weight="900" fill="#34d399" text-anchor="middle">✓</text>
+      <text x="90" y="${point1Y - 4}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="800" fill="#ffffff">01. O ERRO QUE TRAVA SEUS RESULTADOS</text>
+      <text x="90" y="${point1Y + 24}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="17" font-weight="500" fill="#94a3b8">Fazer postagens sem gancho magnético e sem foco em atrair clientes.</text>
 
-      <circle cx="50" cy="170" r="18" fill="#38bdf8" fill-opacity="0.2" stroke="#38bdf8" stroke-width="2" />
-      <text x="50" y="176" font-family="sans-serif" font-size="16" font-weight="900" fill="#38bdf8" text-anchor="middle">✓</text>
-      <text x="90" y="165" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="800" fill="#ffffff">02. A REGRA DOS PRIMEIROS 3 SEGUNDOS</text>
-      <text x="90" y="193" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="17" font-weight="500" fill="#94a3b8">Prender a atenção imediata e eliminar todo e qualquer clichê de IA.</text>
+      <circle cx="50" cy="${point2Y}" r="18" fill="#38bdf8" fill-opacity="0.2" stroke="#38bdf8" stroke-width="2" />
+      <text x="50" y="${point2Y + 6}" font-family="sans-serif" font-size="16" font-weight="900" fill="#38bdf8" text-anchor="middle">✓</text>
+      <text x="90" y="${point2Y - 4}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="800" fill="#ffffff">02. A REGRA DOS PRIMEIROS 3 SEGUNDOS</text>
+      <text x="90" y="${point2Y + 24}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="17" font-weight="500" fill="#94a3b8">Prender a atenção imediata e eliminar todo e qualquer clichê de IA.</text>
 
-      <circle cx="50" cy="275" r="18" fill="#a855f7" fill-opacity="0.2" stroke="#a855f7" stroke-width="2" />
-      <text x="50" y="281" font-family="sans-serif" font-size="16" font-weight="900" fill="#c084fc" text-anchor="middle">✓</text>
-      <text x="90" y="270" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="800" fill="#ffffff">03. CONVERSÃO DIRETA PARA O WHATSAPP</text>
-      <text x="90" y="298" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="17" font-weight="500" fill="#94a3b8">Transformar visualizações em conversas no Zap com o robô ERBots.</text>
+      <circle cx="50" cy="${point3Y}" r="18" fill="#a855f7" fill-opacity="0.2" stroke="#a855f7" stroke-width="2" />
+      <text x="50" y="${point3Y + 6}" font-family="sans-serif" font-size="16" font-weight="900" fill="#c084fc" text-anchor="middle">✓</text>
+      <text x="90" y="${point3Y - 4}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="800" fill="#ffffff">03. CONVERSÃO DIRETA PARA O WHATSAPP</text>
+      <text x="90" y="${point3Y + 24}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="17" font-weight="500" fill="#94a3b8">Transformar visualizações em conversas no Zap com o robô ERBots.</text>
     </g>
 
-    <g transform="translate(84, 870)">
+    <g transform="translate(84, ${ctaY})">
       <rect x="0" y="0" width="912" height="74" rx="20" fill="url(#pillGrad)" />
       <text x="456" y="45" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="21" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="0.8">💬 COMENTE "QUERO" PARA RECEBER NO DIRECT / WHATSAPP</text>
     </g>
 
-    <text x="540" y="990" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="15" font-weight="600" fill="#64748b" text-anchor="middle" letter-spacing="1.5">PUBLICADO VIA ERBOTS • ATENDIMENTO INTELIGENTE</text>
+    <text x="540" y="${footerY}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="15" font-weight="600" fill="#64748b" text-anchor="middle" letter-spacing="1.5">PUBLICADO VIA ERBOTS • ATENDIMENTO INTELIGENTE</text>
   </svg>`;
 
   const base64Svg = Buffer.from(svg).toString('base64');
@@ -578,6 +603,8 @@ export async function generatePostImage(imagePrompt: string, options?: PostImage
  * 6. VIRALITY SKILL (/ig-viral)
  * Faz o Raio-X de um vídeo/tema viral e cria um roteiro viral inédito adaptado para o perfil.
  */
+export type ViralLabMode = 'niche_search' | 'competitor_profile' | 'video_link_or_text';
+
 export interface ViralAnalysisResult {
   source_topic: string;
   hook_breakdown: {
@@ -600,20 +627,43 @@ export interface ViralAnalysisResult {
 export async function analyzeViralVideoAndCreateScript(params: {
   niche: string;
   viralReference: string;
+  mode?: ViralLabMode;
   companyName: string;
   brandVoice?: string;
   knowledgeDigest?: string | null;
 }): Promise<ViralAnalysisResult> {
   const ai = await getGenAI();
+  const mode = params.mode || 'video_link_or_text';
+
+  let modeInstruction = '';
+  if (mode === 'niche_search') {
+    modeInstruction = `MODO ATIVO: PESQUISA DE TENDÊNCIAS VIRAIS NO INSTAGRAM & INTERNET
+TEMA / PALAVRA-CHAVE DO NICHO PESQUISADA: "${params.viralReference}"
+SUA MISSÃO ESPECÍFICA:
+1. Mapeie os formatos, temas polêmicos, quebras de mitos e ganchos mais virais do momento (com mais de 500k visualizações) no Instagram/TikTok para este nicho.
+2. Faça o Raio-X detalhado de por que essa abordagem retém a audiência (0 a 3s, retenção e gatilho emocional).
+3. Desenvolva um roteiro inédito e original de altíssimo potencial de viralização adaptado para "${params.companyName}".`;
+  } else if (mode === 'competitor_profile') {
+    modeInstruction = `MODO ATIVO: ESPIONAGEM & MODELAGEM DE PERFIL DE SUCESSO NO INSTAGRAM
+PERFIL DE REFERÊNCIA INFORMADO: "${params.viralReference}"
+SUA MISSÃO ESPECÍFICA:
+1. Analise o padrão de conteúdo, ganchos e formato de Reels que geram maior engajamento e novos seguidores para esse tipo de perfil.
+2. Faça o Raio-X da estratégia de atração (gancho inicial, dinâmica de cortes e gatilho de conexão).
+3. Crie um roteiro inédito superior e mais magnético, customizado para a empresa "${params.companyName}".`;
+  } else {
+    modeInstruction = `MODO ATIVO: RAIO-X DE VÍDEO OU LINK ESPECÍFICO
+REFERÊNCIA VIRAL INFORMADA: "${params.viralReference}"
+SUA MISSÃO ESPECÍFICA:
+1. Fazer o Raio-X completo do vídeo/gancho (analisar por que viralizou: gancho dos primeiros 3 segundos, ritmo, retenção e gatilho emocional).
+2. Criar um roteiro viral inédito e executável para a empresa "${params.companyName}" no nicho "${params.niche}".`;
+  }
 
   const prompt = `Você é o especialista mestre da Virality Skill (/ig-viral) do ecossistema de Instagram.
-Sua missão:
-1. Fazer o "RAIO-X" completo da referência viral informada (analisar por que performou tão bem: gancho de 0 a 3s, ritmo, retenção e gatilho emocional).
-2. Criar um ROTEIRO VIRAL INÉDITO para a empresa "${params.companyName}" no nicho "${params.niche}", baseado na mesma estrutura vencedora.
 
-REFERÊNCIA VIRAL INFORMADA:
-"${params.viralReference}"
+${modeInstruction}
 
+EMPRESA: "${params.companyName}"
+NICHO: "${params.niche}"
 ${params.knowledgeDigest ? `DIRETRIZES DA MARCA (KNOWLEDGE DIGEST):\n${params.knowledgeDigest}\n` : ''}
 
 DIRETRIZES DE CRIAÇÃO:

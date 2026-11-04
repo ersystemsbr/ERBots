@@ -22,10 +22,34 @@ export async function GET(req: NextRequest) {
       .eq('tenant_id', tenant.id)
       .maybeSingle();
 
+    let cleanAccount = account;
+    if (account) {
+      let aspectRatio = '4:5';
+      let whatsappDeliveryTime = '23:00';
+      let cleanVisualStyle = account.visual_style || '';
+
+      if (cleanVisualStyle.startsWith('{') && cleanVisualStyle.includes('"ratio"')) {
+        try {
+          const meta = JSON.parse(cleanVisualStyle);
+          if (meta.ratio) aspectRatio = meta.ratio;
+          if (meta.deliveryTime) whatsappDeliveryTime = meta.deliveryTime;
+          if (meta.style) cleanVisualStyle = meta.style;
+        } catch {}
+      }
+
+      cleanAccount = {
+        ...account,
+        image_aspect_ratio: aspectRatio,
+        whatsapp_delivery_time: whatsappDeliveryTime,
+        preferred_post_time: account.preferred_post_time ? account.preferred_post_time.slice(0, 5) : '05:30',
+        visual_style: cleanVisualStyle,
+      };
+    }
+
     return NextResponse.json({
       hasAccess,
       tenantStatus: tenant?.instagram_module_status || 'inactive',
-      account: account || null,
+      account: cleanAccount || null,
     });
   } catch (err: any) {
     console.error('[API Instagram Settings GET]', err);
@@ -57,6 +81,8 @@ export async function POST(req: NextRequest) {
       approval_timeout_hours,
       timeout_action,
       preferred_post_time,
+      whatsapp_delivery_time,
+      image_aspect_ratio,
       auto_generate_daily,
       is_active,
     } = body;
@@ -65,6 +91,17 @@ export async function POST(req: NextRequest) {
       .replace(/^@+/, '')
       .trim();
 
+    const chosenRatio = ['4:5', '9:16', '1:1'].includes(image_aspect_ratio) ? image_aspect_ratio : '4:5';
+    const chosenDeliveryTime = String(whatsapp_delivery_time || '23:00').slice(0, 5);
+    const chosenPostTime = String(preferred_post_time || '05:30').slice(0, 5);
+    const cleanStyle = visual_style || 'Fotografia comercial em estúdio, estética clean';
+
+    const packedVisualStyle = JSON.stringify({
+      style: cleanStyle,
+      ratio: chosenRatio,
+      deliveryTime: chosenDeliveryTime,
+    });
+
     const payload = {
       tenant_id: tenant.id,
       account_name: account_name || tenant.name || 'Conta Instagram',
@@ -72,11 +109,11 @@ export async function POST(req: NextRequest) {
       niche: niche || 'Geral',
       target_audience: target_audience || 'Clientes locais',
       brand_voice: brand_voice || 'Profissional e autêntico',
-      visual_style: visual_style || 'Fotografia comercial em estúdio',
+      visual_style: packedVisualStyle,
       approval_mode: approval_mode === 'auto_scheduled' ? 'auto_scheduled' : 'whatsapp_required',
       approval_timeout_hours: Number(approval_timeout_hours) || 4,
       timeout_action: timeout_action === 'skip' ? 'skip' : 'auto_publish',
-      preferred_post_time: preferred_post_time || '18:00:00',
+      preferred_post_time: chosenPostTime.length === 5 ? `${chosenPostTime}:00` : chosenPostTime,
       auto_generate_daily: auto_generate_daily ?? true,
       is_active: is_active ?? true,
       updated_at: new Date().toISOString(),

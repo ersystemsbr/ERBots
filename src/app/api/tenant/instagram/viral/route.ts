@@ -13,9 +13,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Tenant não encontrado' }, { status: 404 });
     }
 
-    const { viralReference } = await req.json();
+    const { viralReference, mode } = await req.json().catch(() => ({}));
     if (!viralReference || !viralReference.trim()) {
-      return NextResponse.json({ error: 'Informe o tema ou texto do vídeo viral de referência.' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Informe a palavra-chave do nicho, @ do perfil ou link/texto para dissecação.' },
+        { status: 400 }
+      );
     }
 
     const db = getServiceSupabase();
@@ -28,6 +31,7 @@ export async function POST(req: NextRequest) {
     const analysis = await analyzeViralVideoAndCreateScript({
       niche: account?.niche || 'Geral',
       viralReference: viralReference.trim(),
+      mode: mode || 'video_link_or_text',
       companyName: account?.account_name || tenant.name || 'Sua Empresa',
       brandVoice: account?.brand_voice || 'Profissional',
       knowledgeDigest: account?.brand_knowledge_digest,

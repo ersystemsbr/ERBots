@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Tenant não encontrado' }, { status: 404 });
     }
 
-    const { topicHint, format } = await req.json().catch(() => ({}));
+    const { topicHint, format, aspectRatio: reqRatio } = await req.json().catch(() => ({}));
     const selectedFormat = (format === 'carousel' || format === 'reel_script') ? format : 'single_image';
 
     const db = getServiceSupabase();
@@ -31,6 +31,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    let aspectRatio: '4:5' | '9:16' | '1:1' = '4:5';
+    let cleanVisualStyle = account.visual_style || '';
+    if (cleanVisualStyle.startsWith('{') && cleanVisualStyle.includes('"ratio"')) {
+      try {
+        const meta = JSON.parse(cleanVisualStyle);
+        if (meta.ratio) aspectRatio = meta.ratio;
+        if (meta.style) cleanVisualStyle = meta.style;
+      } catch {}
+    }
+
+    if (reqRatio && ['4:5', '9:16', '1:1'].includes(reqRatio)) {
+      aspectRatio = reqRatio;
+    }
+
     // 1. Gera o conteúdo do post (gancho, legenda, hashtags, roteiro/slides e prompt de imagem)
     const postData = await generateViralPost({
       companyName: tenant?.name || 'Sua Empresa',
@@ -38,7 +52,7 @@ export async function POST(req: NextRequest) {
       format: selectedFormat,
       knowledgeDigest: account.brand_knowledge_digest,
       topicHint: topicHint || undefined,
-      visualStyle: account.visual_style || undefined,
+      visualStyle: cleanVisualStyle || undefined,
     });
 
     // 2. Gera a imagem comercial com IA (capa ou post único com design de agência)
@@ -53,6 +67,7 @@ export async function POST(req: NextRequest) {
           : selectedFormat === 'carousel'
           ? 'CARROSSEL DIDÁTICO'
           : 'POST ESTRATÉGICO',
+      aspectRatio,
     });
 
     // 3. Define status inicial e agendamento
