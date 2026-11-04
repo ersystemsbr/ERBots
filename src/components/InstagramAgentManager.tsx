@@ -192,6 +192,10 @@ export default function InstagramAgentManager() {
   const [generatingComments, setGeneratingComments] = useState(false);
   const [publishingId, setPublishingId] = useState<string | null>(null);
   const [dispatchingWhatsApp, setDispatchingWhatsApp] = useState(false);
+  const [regeneratingImage, setRegeneratingImage] = useState(false);
+
+  // Histórico de Pesquisas Virais Salvas
+  const [savedViralResearches, setSavedViralResearches] = useState<any[]>([]);
 
   // Inputs
   const [topicHint, setTopicHint] = useState('');
@@ -265,6 +269,12 @@ export default function InstagramAgentManager() {
         if (list.length > 0 && !selectedPost) {
           setSelectedPost(list[0]);
         }
+      }
+
+      const viralRes = await authFetch('/api/tenant/instagram/viral');
+      if (viralRes.ok) {
+        const viralData = await viralRes.json();
+        setSavedViralResearches(viralData.researches || []);
       }
     } catch (err: any) {
       console.error('Erro ao carregar dados do Instagram:', err);
@@ -396,7 +406,15 @@ export default function InstagramAgentManager() {
       if (res.ok) {
         const data = await res.json();
         setViralResult(data.analysis);
-        setFeedbackMsg({ type: 'success', text: 'Raio-X concluído! Roteiro viral inédito gerado.' });
+        setFeedbackMsg({
+          type: 'success',
+          text: 'Raio-X concluído! Roteiro viral salvo no histórico.',
+        });
+        const vRes = await authFetch('/api/tenant/instagram/viral');
+        if (vRes.ok) {
+          const vData = await vRes.json();
+          setSavedViralResearches(vData.researches || []);
+        }
       } else {
         const err = await res.json().catch(() => ({}));
         setFeedbackMsg({ type: 'error', text: cleanErrorMessage(err, 'Erro ao analisar referência viral.') });
@@ -405,6 +423,47 @@ export default function InstagramAgentManager() {
       setFeedbackMsg({ type: 'error', text: cleanErrorMessage(e, 'Erro ao conectar à IA para dissecação viral.') });
     } finally {
       setGeneratingViral(false);
+    }
+  };
+
+  const handleDeleteViralResearch = async (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!confirm('Deseja excluir esta pesquisa viral do histórico?')) return;
+    try {
+      const res = await authFetch(`/api/tenant/instagram/viral?id=${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setSavedViralResearches((prev) => prev.filter((r) => r.id !== id));
+        setFeedbackMsg({ type: 'success', text: 'Pesquisa removida do histórico.' });
+      }
+    } catch {
+      setFeedbackMsg({ type: 'error', text: 'Erro ao excluir pesquisa.' });
+    }
+  };
+
+  const handleRegenerateImage = async (postId: string) => {
+    try {
+      setRegeneratingImage(true);
+      setFeedbackMsg(null);
+      const res = await authFetch('/api/tenant/instagram/posts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'regenerate_image', postId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setPosts((prev) => prev.map((p) => (p.id === postId ? data.post : p)));
+        setSelectedPost(data.post);
+        setFeedbackMsg({
+          type: 'success',
+          text: 'Nova imagem hiper-realista gerada com IA e salva com sucesso!',
+        });
+      } else {
+        setFeedbackMsg({ type: 'error', text: cleanErrorMessage(data, 'Falha ao gerar nova imagem.') });
+      }
+    } catch (e: any) {
+      setFeedbackMsg({ type: 'error', text: cleanErrorMessage(e, 'Erro de conexão ao gerar imagem.') });
+    } finally {
+      setRegeneratingImage(false);
     }
   };
 
@@ -1049,8 +1108,8 @@ export default function InstagramAgentManager() {
                   </div>
                 </div>
 
-                {/* Ações Rápidas do Post: Copiar, Baixar e Publicar */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2">
+                {/* Ações Rápidas do Post: Copiar, Baixar, Regenerar Imagem IA e Publicar */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-2">
                   <button
                     onClick={() =>
                       copyToClipboard(
@@ -1063,7 +1122,7 @@ export default function InstagramAgentManager() {
                     {copiedKey === `caption-${selectedPost.id}` ? (
                       <>
                         <Check className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>Legenda Copiada!</span>
+                        <span>Copiada!</span>
                       </>
                     ) : (
                       <>
@@ -1094,6 +1153,16 @@ export default function InstagramAgentManager() {
                     </button>
                   )}
 
+                  <button
+                    onClick={() => handleRegenerateImage(selectedPost.id)}
+                    disabled={regeneratingImage}
+                    className="py-2.5 px-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 text-xs font-semibold text-emerald-300 transition flex items-center justify-center gap-1.5 disabled:opacity-50"
+                    title="Gera uma imagem hiper-realista inédita com IA"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${regeneratingImage ? 'animate-spin text-emerald-400' : ''}`} />
+                    <span>{regeneratingImage ? 'Gerando Imagem...' : 'Nova Imagem IA'}</span>
+                  </button>
+
                   {isMetaConnected ? (
                     <button
                       onClick={() => handlePublishPost(selectedPost.id)}
@@ -1101,14 +1170,14 @@ export default function InstagramAgentManager() {
                       className="py-2.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition flex items-center justify-center gap-1.5 disabled:opacity-50"
                     >
                       <Send className="w-3.5 h-3.5" />
-                      <span>{publishingId === selectedPost.id ? 'Publicando...' : 'Publicar no Insta'}</span>
+                      <span>{publishingId === selectedPost.id ? 'Publicando...' : 'Publicar'}</span>
                     </button>
                   ) : (
                     <button
                       onClick={() => setActiveTab('settings')}
                       className="py-2.5 px-3 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 text-xs font-semibold transition flex items-center justify-center gap-1.5"
                     >
-                      <span>Ligar Meta API ⚙️</span>
+                      <span>Ligar Meta ⚙️</span>
                     </button>
                   )}
                 </div>
@@ -1245,6 +1314,46 @@ export default function InstagramAgentManager() {
                   : 'Fazer Raio-X & Criar Roteiro Viral'}
               </span>
             </button>
+
+            {/* Histórico de Pesquisas Salvas */}
+            {savedViralResearches.length > 0 && (
+              <div className="pt-3 border-t border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                    <Target className="w-3.5 h-3.5 text-amber-400" />
+                    Pesquisas Salvas no Banco ({savedViralResearches.length})
+                  </span>
+                  <span className="text-[10px] text-slate-500">Clique para carregar o Raio-X</span>
+                </div>
+                <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto [scrollbar-width:thin]">
+                  {savedViralResearches.map((resItem) => (
+                    <div
+                      key={resItem.id}
+                      onClick={() => {
+                        setViralResult(resItem.analysis);
+                        setViralReferenceInput(resItem.reference || resItem.title);
+                        if (resItem.mode) setViralMode(resItem.mode);
+                      }}
+                      className="group flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 hover:border-amber-500/40 cursor-pointer transition text-xs"
+                    >
+                      <span className="font-semibold text-slate-200 group-hover:text-amber-300 truncate max-w-[220px]">
+                        {resItem.title}
+                      </span>
+                      <span className="text-[10px] font-mono text-emerald-400 px-1.5 py-0.5 rounded bg-emerald-500/10">
+                        {resItem.virality_score}%
+                      </span>
+                      <button
+                        onClick={(e) => handleDeleteViralResearch(resItem.id, e)}
+                        className="text-slate-500 hover:text-rose-400 p-0.5 rounded transition"
+                        title="Excluir do histórico"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Resultado do Raio-X e Roteiro Inédito */}
@@ -1467,7 +1576,18 @@ export default function InstagramAgentManager() {
                   <p className="text-slate-400">{auditResult.headline_evaluation}</p>
 
                   <div className="p-3 rounded-lg bg-emerald-950/20 border border-emerald-500/30">
-                    <span className="font-bold text-emerald-300 block mb-1">Bio Recomendada (Pronta para colar):</span>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-bold text-emerald-300">Bio Recomendada (Pronta para colar):</span>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                          auditResult.suggested_bio.length <= 150
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                            : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                        }`}
+                      >
+                        {auditResult.suggested_bio.length}/150 caracteres
+                      </span>
+                    </div>
                     <p className="text-slate-200 whitespace-pre-wrap">{auditResult.suggested_bio}</p>
                     <button
                       onClick={() => copyToClipboard(auditResult.suggested_bio, 'suggested-bio')}

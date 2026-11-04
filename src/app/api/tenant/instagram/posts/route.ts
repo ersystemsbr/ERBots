@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
 import { requireUser, getTenantForUser } from '@/lib/auth';
 import { publishPhotoToInstagram } from '@/lib/instagram-graph';
+import { generatePostImage } from '@/lib/ai/instagram-agent';
 
 export async function GET(req: NextRequest) {
   try {
@@ -55,6 +56,41 @@ export async function POST(req: NextRequest) {
     } else if (action === 'reject') {
       updates.status = 'rejected';
       updates.approval_responded_at = new Date().toISOString();
+    } else if (action === 'regenerate_image') {
+      const { data: currentPost } = await db
+        .from('xerb_instagram_posts')
+        .select('*')
+        .eq('id', postId)
+        .eq('tenant_id', tenant.id)
+        .single();
+
+      if (!currentPost) {
+        return NextResponse.json({ error: 'Post não encontrado' }, { status: 404 });
+      }
+
+      const { data: account } = await db
+        .from('xerb_instagram_accounts')
+        .select('account_name, account_username, niche, visual_style')
+        .eq('tenant_id', tenant.id)
+        .maybeSingle();
+
+      let aspectRatio: '4:5' | '9:16' | '1:1' = '4:5';
+      if (account?.visual_style?.includes('"ratio"')) {
+        try {
+          const meta = JSON.parse(account.visual_style);
+          if (meta.ratio) aspectRatio = meta.ratio;
+        } catch {}
+      }
+
+      const newImageUrl = await generatePostImage(currentPost.image_prompt || currentPost.hook_title, {
+        hookTitle: currentPost.hook_title,
+        companyName: account?.account_name || tenant.name,
+        username: account?.account_username || undefined,
+        niche: account?.niche || undefined,
+        aspectRatio,
+      });
+
+      updates.media_urls = [newImageUrl];
     } else if (action === 'publish_now') {
       // Se houver conexão com a Meta Graph API, dispara para o Instagram real
       const { data: account } = await db

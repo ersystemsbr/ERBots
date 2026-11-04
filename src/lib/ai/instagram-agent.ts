@@ -462,40 +462,52 @@ function wrapText(text: string, maxCharsPerLine = 30, maxLines = 3): string[] {
 }
 
 /**
- * 5. GERAÇÃO DE IMAGENS POR IA (Imagen 3 / Gemini com Formato Configurável: 4:5, 9:16 ou 1:1)
+ * 5. GERAÇÃO DE IMAGENS POR IA (Motor Flux Hiper-Realista + Fallback de Agência)
  */
 export async function generatePostImage(imagePrompt: string, options?: PostImageOptions): Promise<string> {
-  const ai = await getGenAI();
   const ratio = options?.aspectRatio || '4:5';
   const width = 1080;
   let height = 1350; // Padrão 4:5 (mais usado no Feed do Instagram hoje)
-  let imagenRatio = '3:4'; // Proporção mais próxima suportada no Imagen 3
 
   if (ratio === '9:16') {
     height = 1920;
-    imagenRatio = '9:16';
   } else if (ratio === '1:1') {
     height = 1080;
-    imagenRatio = '1:1';
   }
 
+  // 1. GERAÇÃO REAL DE IMAGEM FOTOGRÁFICA / 3D POR IA (Motor Flux de Alta Fidelidade)
   try {
-    const response = await (ai.models as any).generateImages({
-      model: 'imagen-3.0-generate-002',
-      prompt: `${imagePrompt}, commercial advertising photography, perfect lighting, ultra-high resolution, 4k`,
-      config: {
-        numberOfImages: 1,
-        aspectRatio: imagenRatio,
-        outputMimeType: 'image/jpeg',
-      },
-    });
+    const seed = Math.floor(Math.random() * 1000000);
+    const cleanPrompt = `${imagePrompt}, commercial advertising photography, sleek technology, professional studio lighting, 8k resolution, ultra-detailed, photorealistic, sharp focus, vibrant cinematic composition, hyper-realistic, no text artifacts, no watermark`;
+    const fluxUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=${width}&height=${height}&model=flux&nologo=true&seed=${seed}`;
 
-    const base64Image = response.generatedImages?.[0]?.image?.imageBytes;
-    if (base64Image) {
-      return `data:image/jpeg;base64,${base64Image}`;
+    const res = await fetch(fluxUrl, { signal: AbortSignal.timeout(18000) });
+    if (res.ok) {
+      const buffer = await res.arrayBuffer();
+      if (buffer.byteLength > 2000) {
+        const base64 = Buffer.from(buffer).toString('base64');
+        return `data:image/jpeg;base64,${base64}`;
+      }
     }
   } catch (err: any) {
-    console.warn('[InstagramAgent] Imagen 3 indisponível ou cota excedida, fallback para card editorial de agência:', err?.message || err);
+    console.warn('[InstagramAgent] Flux AI timeout ou indisponível, tentando motor rápido:', err?.message || err);
+  }
+
+  // 2. Motor secundário de IA de alta velocidade
+  try {
+    const seed = Math.floor(Math.random() * 1000000);
+    const turboPrompt = `${imagePrompt}, commercial photography, 8k, photorealistic`;
+    const turboUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(turboPrompt)}?width=${width}&height=${height}&model=turbo&nologo=true&seed=${seed}`;
+    const res = await fetch(turboUrl, { signal: AbortSignal.timeout(10000) });
+    if (res.ok) {
+      const buffer = await res.arrayBuffer();
+      if (buffer.byteLength > 2000) {
+        const base64 = Buffer.from(buffer).toString('base64');
+        return `data:image/jpeg;base64,${base64}`;
+      }
+    }
+  } catch (err: any) {
+    console.warn('[InstagramAgent] Motor secundário indisponível:', err?.message || err);
   }
 
   // Fallback: Card de Design Editorial de Agência no formato selecionado (4:5, 9:16 ou 1:1)
@@ -767,13 +779,18 @@ PERFIL:
 - Público: ${params.targetAudience}
 - Bio atual: ${params.currentBio || 'Não informada'}
 
+REGRA CRÍTICA INEGOCIÁVEL PARA "suggested_bio":
+O Instagram possui um limite estrito e absoluto de 150 caracteres para a Bio.
+A "suggested_bio" DEVE ter no MÁXIMO 150 caracteres NO TOTAL (contando todas as letras, espaços, quebras de linha e emojis).
+Seja ultra-objetivo, magnético e conciso. Jamais retorne uma bio com mais de 150 caracteres.
+
 Retorne EXCLUSIVAMENTE um JSON válido com esta estrutura:
 {
   "score": 68,
   "headline_evaluation": "Diagnóstico em 1 linha",
   "strengths": ["Ponto forte 1", "Ponto forte 2"],
   "improvements": ["Melhoria 1", "Melhoria 2"],
-  "suggested_bio": "Linha 1: Quem ajuda e o que resolve\\nLinha 2: Prova social ou diferencial\\nLinha 3: Chamada para ação com seta 👇",
+  "suggested_bio": "Ajudo X a alcançar Y sem Z.\\n+1000 clientes.\\nClique abaixo 👇",
   "suggested_name_field": "${params.accountName} | ${params.niche}",
   "cta_link_suggestion": "Chamada irresistível para o link na bio"
 }`;
@@ -788,14 +805,21 @@ Retorne EXCLUSIVAMENTE um JSON válido com esta estrutura:
 
   const raw = response.text || '{}';
   try {
-    return JSON.parse(raw);
+    const parsed: ProfileAuditResult = JSON.parse(raw);
+    let bio = (parsed.suggested_bio || '').trim();
+    if (bio.length > 150) {
+      bio = bio.slice(0, 150).trim();
+    }
+    parsed.suggested_bio = bio;
+    return parsed;
   } catch {
+    const fallbackBio = 'Atendimento inteligente 24/7 para seu negócio.\\n+1.000 clientes automatizados.\\nClique no link abaixo e teste grátis 👇';
     return {
       score: 74,
       headline_evaluation: 'Perfil com bom posicionamento básico, necessitando de CTA mais forte na Bio.',
       strengths: ['Nicho bem definido', 'Proposta de valor compreensível'],
       improvements: ['Inserir palavra-chave do nicho no campo Nome', 'Criar CTA mais direto para o Direct/WhatsApp'],
-      suggested_bio: 'Transformamos seu negócio com atendimento inteligente 24/7.\\nMais de 1.000 atendimentos diários automatizados.\\nClique abaixo e teste grátis 👇',
+      suggested_bio: fallbackBio.slice(0, 150),
       suggested_name_field: `${params.accountName} | ${params.niche}`,
       cta_link_suggestion: 'Fale com nosso robô no WhatsApp agora 👇',
     };
