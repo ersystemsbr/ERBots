@@ -9,6 +9,7 @@ import { checkAiGate, getUsage, recordUsage } from '@/lib/billing/usage';
 import { getAddonsConfig, getPlansConfig } from '@/lib/billing/plans-config';
 import { formatBRL } from '@/lib/plans';
 import { logSystemEvent } from '@/lib/monitoring';
+import { runInstagramDailyCron } from '@/lib/ai/instagram-cron';
 
 export const maxDuration = 60;
 
@@ -366,12 +367,19 @@ async function handleCron(req: NextRequest) {
       processTrialNudges(supabase),
     ]);
 
-    if (followups.sent > 0 || trialNudges.sent > 0) {
+    let instagramCron = { checked: 0, generated: 0 };
+    try {
+      instagramCron = await runInstagramDailyCron();
+    } catch (igErr) {
+      console.warn('[Cron Automations] Falha ao executar rotina diária de Instagram:', igErr);
+    }
+
+    if (followups.sent > 0 || trialNudges.sent > 0 || instagramCron.generated > 0) {
       await logSystemEvent({
         level: 'info',
         source: 'cron.automations',
-        message: `Automações executadas: ${followups.sent} follow-up(s) e ${trialNudges.sent} aviso(s) de trial enviados.`,
-        metadata: { followups, trialNudges },
+        message: `Automações executadas: ${followups.sent} follow-up(s), ${trialNudges.sent} aviso(s) de trial e ${instagramCron.generated} post(s) de Instagram criados.`,
+        metadata: { followups, trialNudges, instagramCron },
       });
     }
 
@@ -379,6 +387,7 @@ async function handleCron(req: NextRequest) {
       success: true,
       followups,
       trialNudges,
+      instagramCron,
     });
   } catch (err: any) {
     console.error('[Cron Automations] Erro:', err);

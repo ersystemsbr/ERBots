@@ -421,16 +421,53 @@ Retorne EXCLUSIVAMENTE um array JSON com 7 objetos:
   }
 }
 
+export interface PostImageOptions {
+  hookTitle?: string;
+  companyName?: string;
+  username?: string;
+  niche?: string;
+  categoryBadge?: string;
+}
+
+function escapeXml(str: string): string {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function wrapText(text: string, maxCharsPerLine = 30, maxLines = 3): string[] {
+  const words = String(text || '').trim().split(/\s+/);
+  const lines: string[] = [];
+  let currentLine = '';
+
+  for (const word of words) {
+    if ((currentLine + ' ' + word).trim().length <= maxCharsPerLine) {
+      currentLine = (currentLine + ' ' + word).trim();
+    } else {
+      if (currentLine) lines.push(currentLine);
+      currentLine = word;
+      if (lines.length >= maxLines - 1) break;
+    }
+  }
+  if (currentLine && lines.length < maxLines) {
+    lines.push(currentLine);
+  }
+  return lines;
+}
+
 /**
- * 5. GERAÇÃO DE IMAGENS POR IA (Imagen 3 / Gemini)
+ * 5. GERAÇÃO DE IMAGENS POR IA (Imagen 3 / Gemini com Design Executivo de Agência)
  */
-export async function generatePostImage(imagePrompt: string): Promise<string> {
+export async function generatePostImage(imagePrompt: string, options?: PostImageOptions): Promise<string> {
   const ai = await getGenAI();
 
   try {
     const response = await (ai.models as any).generateImages({
       model: 'imagen-3.0-generate-002',
-      prompt: `${imagePrompt}, commercial advertising photography, perfect lighting, 4k`,
+      prompt: `${imagePrompt}, commercial advertising photography, perfect lighting, ultra-high resolution, 4k`,
       config: {
         numberOfImages: 1,
         aspectRatio: '1:1',
@@ -443,28 +480,94 @@ export async function generatePostImage(imagePrompt: string): Promise<string> {
       return `data:image/jpeg;base64,${base64Image}`;
     }
   } catch (err: any) {
-    console.warn('[InstagramAgent] Imagen 3 indisponível ou cota excedida, fallback visual:', err?.message || err);
+    console.warn('[InstagramAgent] Imagen 3 indisponível ou cota excedida, fallback para card editorial de agência:', err?.message || err);
   }
 
-  // Fallback SVG com design moderno
-  const cleanPrompt = imagePrompt.slice(0, 110).replace(/["<>]/g, '');
+  // Fallback: Card de Design Editorial de Agência (padrão Instagram 1080x1080)
+  const title = options?.hookTitle || 'Estratégia Prática para o Seu Negócio';
+  const badge = escapeXml(options?.categoryBadge || 'ESTRATÉGIA PRÁTICA');
+  const rawHandle = options?.username || options?.companyName || 'seu_negocio';
+  const handle = escapeXml(`@${rawHandle.replace(/^@+/, '')}`);
+  const lines = wrapText(title, 28, 3);
+
+  const titleSvgLines = lines
+    .map(
+      (line, i) =>
+        `<text x="0" y="${i * 68}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="56" font-weight="900" fill="${
+          i === 0 ? '#ffffff' : '#f8fafc'
+        }" letter-spacing="-1">${escapeXml(line)}</text>`
+    )
+    .join('\n');
+
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080">
     <defs>
       <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stop-color="#312e81" />
-        <stop offset="50%" stop-color="#4f46e5" />
-        <stop offset="100%" stop-color="#db2777" />
+        <stop offset="0%" stop-color="#090d16" />
+        <stop offset="50%" stop-color="#0f172a" />
+        <stop offset="100%" stop-color="#020617" />
+      </linearGradient>
+      <radialGradient id="glowTop" cx="20%" cy="15%" r="65%">
+        <stop offset="0%" stop-color="#10b981" stop-opacity="0.22" />
+        <stop offset="100%" stop-color="#10b981" stop-opacity="0" />
+      </radialGradient>
+      <radialGradient id="glowBottom" cx="85%" cy="85%" r="60%">
+        <stop offset="0%" stop-color="#6366f1" stop-opacity="0.20" />
+        <stop offset="100%" stop-color="#6366f1" stop-opacity="0" />
+      </radialGradient>
+      <linearGradient id="pillGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" stop-color="#059669" />
+        <stop offset="100%" stop-color="#10b981" />
+      </linearGradient>
+      <linearGradient id="accentLine" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" stop-color="#10b981" />
+        <stop offset="50%" stop-color="#38bdf8" />
+        <stop offset="100%" stop-color="#818cf8" />
       </linearGradient>
     </defs>
+
     <rect width="1080" height="1080" fill="url(#bg)" />
-    <circle cx="540" cy="400" r="140" fill="white" opacity="0.1" />
-    <text x="540" y="420" font-family="system-ui, sans-serif" font-size="80" font-weight="900" fill="white" text-anchor="middle">ERBOTS</text>
-    <text x="540" y="520" font-family="system-ui, sans-serif" font-size="32" font-weight="bold" fill="#fcd34d" text-anchor="middle">ARTE GERADA POR IA</text>
-    <foreignObject x="140" y="600" width="800" height="300">
-      <div xmlns="http://www.w3.org/1999/xhtml" style="color: white; font-family: system-ui, sans-serif; font-size: 24px; text-align: center; line-height: 1.5; opacity: 0.9;">
-        ${cleanPrompt}
-      </div>
-    </foreignObject>
+    <rect width="1080" height="1080" fill="url(#glowTop)" />
+    <rect width="1080" height="1080" fill="url(#glowBottom)" />
+
+    <rect x="44" y="44" width="992" height="992" rx="36" fill="none" stroke="#1e293b" stroke-width="2" />
+
+    <g transform="translate(84, 94)">
+      <rect x="0" y="0" width="260" height="48" rx="24" fill="#10b981" fill-opacity="0.16" stroke="#10b981" stroke-opacity="0.45" stroke-width="1.5" />
+      <text x="130" y="30" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="800" fill="#34d399" text-anchor="middle" letter-spacing="1.2">⚡ ${badge}</text>
+      <text x="912" y="32" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="700" fill="#94a3b8" text-anchor="end">${handle}</text>
+    </g>
+
+    <rect x="84" y="174" width="912" height="2" fill="url(#accentLine)" rx="1" />
+
+    <g transform="translate(84, 260)">
+      ${titleSvgLines}
+    </g>
+
+    <g transform="translate(84, 480)">
+      <rect x="0" y="0" width="912" height="340" rx="28" fill="#0f172a" fill-opacity="0.88" stroke="#334155" stroke-width="1.5" />
+      
+      <circle cx="50" cy="65" r="18" fill="#10b981" fill-opacity="0.2" stroke="#10b981" stroke-width="2" />
+      <text x="50" y="71" font-family="sans-serif" font-size="16" font-weight="900" fill="#34d399" text-anchor="middle">✓</text>
+      <text x="90" y="60" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="800" fill="#ffffff">01. O ERRO QUE TRAVA SEUS RESULTADOS</text>
+      <text x="90" y="88" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="17" font-weight="500" fill="#94a3b8">Fazer postagens sem gancho magnético e sem foco em atrair clientes.</text>
+
+      <circle cx="50" cy="170" r="18" fill="#38bdf8" fill-opacity="0.2" stroke="#38bdf8" stroke-width="2" />
+      <text x="50" y="176" font-family="sans-serif" font-size="16" font-weight="900" fill="#38bdf8" text-anchor="middle">✓</text>
+      <text x="90" y="165" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="800" fill="#ffffff">02. A REGRA DOS PRIMEIROS 3 SEGUNDOS</text>
+      <text x="90" y="193" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="17" font-weight="500" fill="#94a3b8">Prender a atenção imediata e eliminar todo e qualquer clichê de IA.</text>
+
+      <circle cx="50" cy="275" r="18" fill="#a855f7" fill-opacity="0.2" stroke="#a855f7" stroke-width="2" />
+      <text x="50" y="281" font-family="sans-serif" font-size="16" font-weight="900" fill="#c084fc" text-anchor="middle">✓</text>
+      <text x="90" y="270" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="800" fill="#ffffff">03. CONVERSÃO DIRETA PARA O WHATSAPP</text>
+      <text x="90" y="298" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="17" font-weight="500" fill="#94a3b8">Transformar visualizações em conversas no Zap com o robô ERBots.</text>
+    </g>
+
+    <g transform="translate(84, 870)">
+      <rect x="0" y="0" width="912" height="74" rx="20" fill="url(#pillGrad)" />
+      <text x="456" y="45" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="21" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="0.8">💬 COMENTE "QUERO" PARA RECEBER NO DIRECT / WHATSAPP</text>
+    </g>
+
+    <text x="540" y="990" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="15" font-weight="600" fill="#64748b" text-anchor="middle" letter-spacing="1.5">PUBLICADO VIA ERBOTS • ATENDIMENTO INTELIGENTE</text>
   </svg>`;
 
   const base64Svg = Buffer.from(svg).toString('base64');

@@ -186,6 +186,7 @@ export default function InstagramAgentManager() {
   const [auditingProfile, setAuditingProfile] = useState(false);
   const [generatingComments, setGeneratingComments] = useState(false);
   const [publishingId, setPublishingId] = useState<string | null>(null);
+  const [dispatchingWhatsApp, setDispatchingWhatsApp] = useState(false);
 
   // Inputs
   const [topicHint, setTopicHint] = useState('');
@@ -295,6 +296,36 @@ export default function InstagramAgentManager() {
       }
     } catch {
       setFeedbackMsg({ type: 'error', text: 'Erro de conexão ao alterar modo de automação.' });
+    }
+  };
+
+  const handleDispatchWhatsApp = async () => {
+    try {
+      setDispatchingWhatsApp(true);
+      setFeedbackMsg(null);
+      const res = await authFetch('/api/tenant/instagram/dispatch-whatsapp', {
+        method: 'POST',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setFeedbackMsg({
+          type: 'success',
+          text: data.message || 'Post de hoje gerado e enviado com sucesso para o seu WhatsApp!',
+        });
+        await loadData();
+      } else {
+        setFeedbackMsg({
+          type: 'error',
+          text: cleanErrorMessage(data, 'Falha ao despachar post para o WhatsApp.'),
+        });
+      }
+    } catch (e: any) {
+      setFeedbackMsg({
+        type: 'error',
+        text: cleanErrorMessage(e, 'Erro ao conectar ao servidor para envio.'),
+      });
+    } finally {
+      setDispatchingWhatsApp(false);
     }
   };
 
@@ -648,6 +679,42 @@ export default function InstagramAgentManager() {
             <Flame className="w-5 h-5" />
           </div>
         </div>
+      </div>
+
+      {/* Banner Executivo de Automação Diária no WhatsApp */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-emerald-950/40 via-slate-900 to-indigo-950/30 border border-emerald-500/30 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xl">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+              Piloto Automático &amp; Rotina Diária no WhatsApp
+            </span>
+          </div>
+          <h3 className="text-base sm:text-lg font-bold text-white">
+            O robô acorda todo dia de manhã, cria seu post e entrega pronto no seu WhatsApp
+          </h3>
+          <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
+            Você não precisa ficar digitando prompts nem abrindo o painel toda hora. O post do dia chega mastigado no seu WhatsApp com arte de agência e legenda com CTA. Basta responder &quot;1&quot; no Zap para aprovar!
+          </p>
+        </div>
+
+        <button
+          onClick={handleDispatchWhatsApp}
+          disabled={dispatchingWhatsApp}
+          className="px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-extrabold text-xs sm:text-sm shadow-lg shadow-emerald-500/20 transition flex items-center justify-center gap-2 shrink-0 disabled:opacity-50"
+        >
+          {dispatchingWhatsApp ? (
+            <>
+              <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+              <span>Gerando e Enviando no WhatsApp...</span>
+            </>
+          ) : (
+            <>
+              <MessageSquare className="w-4 h-4" />
+              <span>Disparar Post de Hoje no meu WhatsApp Agora</span>
+            </>
+          )}
+        </button>
       </div>
 
       {/* Navegação por Abas (Estilo Executivo Painel Master) */}

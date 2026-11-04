@@ -41,8 +41,19 @@ export async function POST(req: NextRequest) {
       visualStyle: account.visual_style || undefined,
     });
 
-    // 2. Gera a imagem comercial com IA (capa ou post único)
-    const imageUrl = await generatePostImage(postData.image_prompt);
+    // 2. Gera a imagem comercial com IA (capa ou post único com design de agência)
+    const imageUrl = await generatePostImage(postData.image_prompt, {
+      hookTitle: postData.hook_title,
+      companyName: account.account_name || tenant?.name || 'Sua Empresa',
+      username: account.account_username || undefined,
+      niche: account.niche || undefined,
+      categoryBadge:
+        selectedFormat === 'reel_script'
+          ? 'ROTEIRO REELS'
+          : selectedFormat === 'carousel'
+          ? 'CARROSSEL DIDÁTICO'
+          : 'POST ESTRATÉGICO',
+    });
 
     // 3. Define status inicial e agendamento
     const isApprovalRequired = account.approval_mode === 'whatsapp_required';

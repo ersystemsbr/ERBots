@@ -15,6 +15,7 @@ import { getAddonsConfig, getPlansConfig } from '@/lib/billing/plans-config';
 import { currentUsagePeriod, formatBRL, getPlan, computeAnnualPricing } from '@/lib/plans';
 import { logSystemEvent } from '@/lib/monitoring';
 import { dispatchOutboundWebhook } from '@/lib/outbound-webhook';
+import { generateDailyPostForTenant } from '@/lib/ai/instagram-cron';
 
 export const maxDuration = 60;
 
@@ -343,11 +344,117 @@ async function notifyOwner(args: {
 // ---------------------------------------------------------------------------
 // Mensagem enviada pelo próprio dono (celular) → pausa a IA nessa conversa
 // ---------------------------------------------------------------------------
+async function handleInstagramPostApproval(
+  db: Db,
+  params: {
+    tenantId: string;
+    instanceName: string;
+    remoteJid: string;
+    text: string;
+  }
+): Promise<NextResponse | null> {
+  const lower = params.text.trim().toLowerCase();
+  const isApprove = lower === '1' || lower === 'aprovar' || lower === 'publicar' || lower === 'sim';
+  const isSchedule = lower === '2' || lower === 'agendar' || lower.includes('18:00');
+  const isRegenerate = lower === '3' || lower === 'outro' || lower === 'gerar outro' || lower === 'trocar';
+
+  if (!isApprove && !isSchedule && !isRegenerate) return null;
+
+  // Busca o post mais recente pendente de aprovação deste tenant
+  const { data: pendingPost } = await db
+    .from('xerb_instagram_posts')
+    .select('id, hook_title, status')
+    .eq('tenant_id', params.tenantId)
+    .eq('status', 'pending_approval')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!pendingPost) return null;
+
+  const nowIso = new Date().toISOString();
+
+  if (isApprove) {
+    await db
+      .from('xerb_instagram_posts')
+      .update({
+        status: 'scheduled',
+        approval_responded_at: nowIso,
+        updated_at: nowIso,
+      })
+      .eq('id', pendingPost.id);
+
+    await sendTextMessage(
+      params.instanceName,
+      params.remoteJid,
+      `✅ *Post Aprovado com Sucesso!* (ERBots)\n\n📌 "${pendingPost.hook_title}"\nO post já está pronto e programado no seu painel para atrair clientes hoje! 🚀`
+    );
+    return NextResponse.json({ success: true, action: 'instagram_approved' });
+  }
+
+  if (isSchedule) {
+    const scheduledFor = new Date();
+    scheduledFor.setHours(18, 0, 0, 0);
+    if (scheduledFor.getTime() <= Date.now()) {
+      scheduledFor.setDate(scheduledFor.getDate() + 1);
+    }
+    await db
+      .from('xerb_instagram_posts')
+      .update({
+        status: 'scheduled',
+        scheduled_for: scheduledFor.toISOString(),
+        approval_responded_at: nowIso,
+        updated_at: nowIso,
+      })
+      .eq('id', pendingPost.id);
+
+    await sendTextMessage(
+      params.instanceName,
+      params.remoteJid,
+      `⏰ *Post Agendado para as 18:00!* (ERBots)\n\n📌 "${pendingPost.hook_title}"\nProgramado com sucesso! 🎯`
+    );
+    return NextResponse.json({ success: true, action: 'instagram_scheduled' });
+  }
+
+  if (isRegenerate) {
+    await db
+      .from('xerb_instagram_posts')
+      .update({ status: 'rejected', approval_responded_at: nowIso, updated_at: nowIso })
+      .eq('id', pendingPost.id);
+
+    await sendTextMessage(
+      params.instanceName,
+      params.remoteJid,
+      '🔄 *Entendido!* Estou gerando uma nova opção de tema estratégico com gancho viral para você agora mesmo...'
+    );
+
+    // Dispara nova geração assíncrona
+    generateDailyPostForTenant(params.tenantId).catch((e) =>
+      console.warn('[Instagram Webhook Regenerate] Erro:', e)
+    );
+
+    return NextResponse.json({ success: true, action: 'instagram_regenerating' });
+  }
+
+  return null;
+}
+
 async function handleOwnerMessage(
   db: Db,
-  params: { tenant: any; tenantId: string; remoteJid: string; cleanPhone: string; waId?: string | null; content: Content }
+  params: { tenant: any; tenantId: string; remoteJid: string; cleanPhone: string; waId?: string | null; content: Content; instanceName?: string }
 ) {
-  const { tenant, tenantId, remoteJid, cleanPhone, waId, content } = params;
+  const { tenant, tenantId, remoteJid, cleanPhone, waId, content, instanceName } = params;
+
+  // Intercepta aprovação de post de Instagram se o dono respondeu 1, 2 ou 3 em auto-conversa
+  if (content.kind === 'text' && instanceName) {
+    const approvalRes = await handleInstagramPostApproval(db, {
+      tenantId,
+      instanceName,
+      remoteJid,
+      text: content.text,
+    });
+    if (approvalRes) return approvalRes;
+  }
 
   // Mensagens para o próprio número do dono / alerta (ex.: avisos de transbordo) não são conversas de cliente
   if (
@@ -678,7 +785,23 @@ export async function POST(req: NextRequest) {
 
     // 3.1 Mensagem enviada pelo próprio número conectado (dono respondendo pelo celular, eco do painel/IA)
     if (key.fromMe) {
-      return await handleOwnerMessage(supabase, { tenant, tenantId, remoteJid, cleanPhone, waId, content });
+      return await handleOwnerMessage(supabase, { tenant, tenantId, remoteJid, cleanPhone, waId, content, instanceName });
+    }
+
+    // 3.1.5 Intercepta aprovação de post de Instagram se o dono enviou comando pelo WhatsApp (1, 2, 3)
+    const isOwnerSender =
+      !cleanPhone.startsWith('LID:') &&
+      (samePhone(cleanPhone, normalizeBrPhone(tenant.phone)) ||
+        samePhone(cleanPhone, normalizeBrPhone(tenant.alert_phone)));
+
+    if (isOwnerSender && content.kind === 'text') {
+      const approvalRes = await handleInstagramPostApproval(supabase, {
+        tenantId,
+        instanceName,
+        remoteJid,
+        text: content.text,
+      });
+      if (approvalRes) return approvalRes;
     }
 
     // 3.2 Idempotência: a Evolution pode reenviar o mesmo webhook
