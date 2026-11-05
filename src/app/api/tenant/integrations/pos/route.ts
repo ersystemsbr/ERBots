@@ -6,6 +6,7 @@ import {
   saveTenantIntegration,
   testSaiposConnection,
   createSaiposOrder,
+  syncSaiposCatalogToKnowledgeBase,
   SaiposCredentials,
   SaiposSettings,
 } from '@/lib/integrations/saipos';
@@ -196,6 +197,11 @@ export async function POST(req: NextRequest) {
         orderId: injectResult.external_order_id,
         displayId: injectResult.display_id,
       });
+    }
+
+    if (action === 'sync_menu') {
+      const syncResult = await syncSaiposCatalogToKnowledgeBase(tenantId);
+      return NextResponse.json(syncResult);
     }
 
     // Ação Padrão: Salvar configurações

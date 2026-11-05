@@ -636,3 +636,143 @@ export async function saveTenantIntegration(
     return savedInTable;
   }
 }
+
+/**
+ * Consulta o catálogo de produtos e categorias cadastrados na loja da Saipos
+ * Endpoint: GET https://order-api.saipos.com/catalog
+ */
+export async function fetchSaiposCatalog(credentials: SaiposCredentials): Promise<{
+  success: boolean;
+  catalog?: any[];
+  message: string;
+}> {
+  const idPartner = (credentials.id_partner || credentials.token || '').trim();
+  if (!idPartner) {
+    return { success: false, message: 'IdPartner não configurado.' };
+  }
+
+  const auth = await getSaiposAuthToken(idPartner);
+  if (!auth.success || !auth.token) {
+    return { success: false, message: auth.message || 'Falha na autenticação da Saipos.' };
+  }
+
+  try {
+    const res = await fetch('https://order-api.saipos.com/catalog', {
+      headers: {
+        Authorization: auth.token,
+        Accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (!res.ok) {
+      return { success: false, message: `Erro ao buscar catálogo na Saipos (HTTP ${res.status}).` };
+    }
+
+    const data = await res.json();
+    return {
+      success: true,
+      catalog: Array.isArray(data) ? data : [],
+      message: 'Catálogo recuperado com sucesso.',
+    };
+  } catch (err: any) {
+    return { success: false, message: `Erro de conexão ao buscar catálogo: ${err?.message || 'tempo de resposta esgotado'}` };
+  }
+}
+
+/**
+ * Puxa o cardápio da Saipos e grava na Base de Conhecimento da IA (xerb_knowledge_base)
+ * agrupando por categorias para que o atendente WhatsApp saiba responder preços e opções.
+ */
+export async function syncSaiposCatalogToKnowledgeBase(tenantId: string): Promise<{
+  success: boolean;
+  message: string;
+  totalItems?: number;
+  totalCategories?: number;
+}> {
+  const config = await getTenantIntegration(tenantId, 'saipos');
+  if (!config.is_active || !config.credentials.id_partner) {
+    return { success: false, message: 'A integração com a Saipos não está configurada ou ativa neste estabelecimento.' };
+  }
+
+  const catalogRes = await fetchSaiposCatalog(config.credentials);
+  if (!catalogRes.success || !catalogRes.catalog) {
+    return { success: false, message: catalogRes.message };
+  }
+
+  const catalog = catalogRes.catalog;
+  if (catalog.length === 0) {
+    return { success: false, message: 'Nenhum item encontrado no cardápio da Saipos desta loja.' };
+  }
+
+  // Agrupa os itens ativos por categoria
+  const byCategory: Record<string, any[]> = {};
+  let totalActive = 0;
+
+  for (const item of catalog) {
+    if (item.store_item_enabled === 'N') continue;
+    const cat = (item.categoria || 'Geral').trim();
+    if (!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push(item);
+    totalActive++;
+  }
+
+  const categories = Object.keys(byCategory);
+  if (categories.length === 0) {
+    return { success: false, message: 'Nenhum item habilitado para venda foi encontrado no catálogo da Saipos.' };
+  }
+
+  const supabase = getServiceSupabase();
+
+  for (const cat of categories) {
+    const items = byCategory[cat];
+    const lines = items.map((it) => {
+      const priceVal = Number(it.price) || 0;
+      const priceStr = priceVal > 0 ? `R$ ${priceVal.toFixed(2).replace('.', ',')}` : 'Sob consulta';
+      const codeStr = it.codigo_saipos || it.id_store_item ? ` (Cód: ${it.codigo_saipos || it.id_store_item})` : '';
+      const complementStr = it.complemento ? ` [Opções: ${it.complemento}]` : '';
+      return `• ${it.item} - ${priceStr}${codeStr}${complementStr}`;
+    });
+
+    const title = `Cardápio Saipos - ${cat}`;
+    const content = `[Categoria: ${cat.toUpperCase()}]\nItens oficiais sincronizados do PDV Saipos:\n${lines.join('\n')}\n\nObservação: use exatamente esses nomes e valores oficiais de tabela para informar os clientes no WhatsApp.`;
+
+    try {
+      const { data: existing } = await supabase
+        .from('xerb_knowledge_base')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .eq('title', title)
+        .maybeSingle();
+
+      if (existing?.id) {
+        await supabase
+          .from('xerb_knowledge_base')
+          .update({
+            content,
+            category: 'cardapio',
+            is_active: true,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existing.id);
+      } else {
+        await supabase.from('xerb_knowledge_base').insert({
+          tenant_id: tenantId,
+          category: 'cardapio',
+          title,
+          content,
+          is_active: true,
+        });
+      }
+    } catch (err: any) {
+      console.warn(`[syncSaiposCatalogToKnowledgeBase] Aviso ao salvar categoria ${cat}:`, err?.message || err);
+    }
+  }
+
+  return {
+    success: true,
+    totalItems: totalActive,
+    totalCategories: categories.length,
+    message: `Cardápio sincronizado com sucesso! ${totalActive} produtos em ${categories.length} categorias foram importados para a Base de Conhecimento da IA.`,
+  };
+}

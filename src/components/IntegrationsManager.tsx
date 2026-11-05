@@ -21,6 +21,7 @@ import {
   ArrowRight,
   Database,
   Code,
+  BookOpen,
 } from 'lucide-react';
 
 interface IntegrationsManagerProps {
@@ -61,6 +62,7 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
   // Estados de ação
   const [testingConnection, setTestingConnection] = useState(false);
   const [simulatingOrder, setSimulatingOrder] = useState(false);
+  const [syncingMenu, setSyncingMenu] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -255,6 +257,39 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
       setFeedbackMsg({ type: 'error', text: 'Erro ao conectar para envio do pedido simulado.' });
     } finally {
       setSimulatingOrder(false);
+    }
+  };
+
+  const handleSyncMenu = async () => {
+    try {
+      setSyncingMenu(true);
+      setFeedbackMsg(null);
+      const res = await authFetch('/api/tenant/integrations/pos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          provider: 'saipos',
+          action: 'sync_menu',
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setFeedbackMsg({
+          type: 'success',
+          text: data.message || 'Cardápio da Saipos sincronizado com sucesso com a IA!',
+        });
+      } else {
+        setFeedbackMsg({
+          type: 'error',
+          text: data.message || data.error || 'Erro ao sincronizar cardápio da Saipos.',
+        });
+      }
+    } catch {
+      setFeedbackMsg({ type: 'error', text: 'Erro ao conectar para sincronizar o cardápio.' });
+    } finally {
+      setSyncingMenu(false);
     }
   };
 
@@ -644,6 +679,26 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
                     <>
                       <ShoppingBag className="w-3.5 h-3.5" />
                       <span>Disparar Pedido de Teste</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSyncMenu}
+                  disabled={syncingMenu || !saiposForm.is_active}
+                  className="px-4 py-2.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-xs font-bold transition flex items-center gap-2 disabled:opacity-50"
+                  title="Puxa os produtos e preços do cardápio cadastrado na Saipos para a Base de Conhecimento da IA"
+                >
+                  {syncingMenu ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Sincronizando Cardápio...</span>
+                    </>
+                  ) : (
+                    <>
+                      <BookOpen className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Sincronizar Cardápio para a IA</span>
                     </>
                   )}
                 </button>
