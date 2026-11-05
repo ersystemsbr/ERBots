@@ -284,21 +284,40 @@ export async function createSaiposOrder(
     })),
     payment_types:
       order.payments && order.payments.length > 0
-        ? order.payments.map((p) => ({
-            code:
-              p.type === 'CASH'
-                ? 'DIN'
-                : p.type === 'DEBIT_CARD'
-                ? 'DEB'
-                : p.type === 'CREDIT_CARD'
-                ? 'CRE'
-                : 'PIX',
-            amount: Number(p.value) || Number(order.totals?.total),
-            change_for: Number(p.change_for) || 0,
-          }))
+        ? order.payments.map((p) => {
+            const typeUpper = String(p.type || '').toUpperCase();
+            if (typeUpper === 'PIX') {
+              return {
+                code: 'PARTNER_PAYMENT',
+                complement: 'pix',
+                type: 'ONLINE',
+                amount: Number(p.value) || Number(order.totals?.total) || 0,
+                change_for: 0,
+              };
+            }
+            if (typeUpper === 'DEBIT_CARD' || typeUpper === 'DEB') {
+              return {
+                code: 'DEB',
+                amount: Number(p.value) || Number(order.totals?.total) || 0,
+                change_for: 0,
+              };
+            }
+            if (typeUpper === 'CREDIT_CARD' || typeUpper === 'CRE') {
+              return {
+                code: 'CRE',
+                amount: Number(p.value) || Number(order.totals?.total) || 0,
+                change_for: 0,
+              };
+            }
+            return {
+              code: 'DIN',
+              amount: Number(p.value) || Number(order.totals?.total) || 0,
+              change_for: Number(p.change_for) || 0,
+            };
+          })
         : [
             {
-              code: 'PIX',
+              code: 'DIN',
               amount: Number(order.totals?.total || order.totals?.items_price || 0),
               change_for: 0,
             },
@@ -319,11 +338,12 @@ export async function createSaiposOrder(
 
     if (res.ok || res.status === 200 || res.status === 201) {
       const data = await res.json().catch(() => ({}));
+      const saleNumber = data.sale_number ? String(data.sale_number) : null;
       return {
         success: true,
         external_order_id: data.order_id || externalId,
-        display_id: data.display_id || displayId,
-        message: 'Pedido injetado com sucesso no PDV da Saipos! 👨‍🍳🛵',
+        display_id: saleNumber ? `#${saleNumber}` : (data.display_id || displayId),
+        message: `Pedido ${saleNumber ? `(Venda #${saleNumber})` : ''} injetado com sucesso no PDV da Saipos! 👨‍🍳🛵`,
         rawResponse: data,
       };
     }

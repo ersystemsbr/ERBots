@@ -116,13 +116,13 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
     setSaiposForm((prev) => ({
       ...prev,
       id_partner: '33f12a976e2a7a100b37fe7d0d102257',
-      cod_store: '99018',
+      cod_store: 'b2ad11df-f505-4409-b955-7da9420d871c',
       environment: 'homolog',
       is_active: true,
     }));
     setFeedbackMsg({
       type: 'success',
-      text: 'Dados da Loja de Teste (Sandbox) preenchidos! Clique em Testar Conexão ou Salvar.',
+      text: 'Dados da Loja de Teste preenchidos! Clique em Salvar e depois em Disparar Pedido de Teste.',
     });
   };
 
