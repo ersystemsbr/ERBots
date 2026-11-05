@@ -283,7 +283,7 @@ function cleanErrorMessage(raw: any, fallback = 'Ocorreu um erro ao processar.')
   return str.trim() || fallback;
 }
 
-export default function InstagramAgentManager() {
+export default function InstagramAgentManager({ onlySettings = false }: { onlySettings?: boolean } = {}) {
   const [loading, setLoading] = useState(true);
   const [hasAccess, setHasAccess] = useState(true);
   const [account, setAccount] = useState<InstagramAccount | null>(null);
@@ -755,6 +755,275 @@ export default function InstagramAgentManager() {
     }
   };
 
+  const renderBrandSettingsCard = () => (
+    <form onSubmit={handleSaveSettings} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+      <h4 className="text-sm font-bold text-white flex items-center gap-2">
+        <Sliders className="w-4 h-4 text-emerald-400" />
+        Voz da Marca &amp; Nicho
+      </h4>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-slate-400 block mb-1">Nome da Empresa</label>
+          <input
+            type="text"
+            value={formData.account_name}
+            onChange={(e) => setFormData({ ...formData, account_name: e.target.value })}
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-slate-400 block mb-1">@ do Instagram</label>
+          <input
+            type="text"
+            value={formData.account_username}
+            onChange={(e) => setFormData({ ...formData, account_username: e.target.value })}
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className="text-xs text-slate-400 block mb-1">Nicho de Atuação</label>
+        <input
+          type="text"
+          value={formData.niche}
+          onChange={(e) => setFormData({ ...formData, niche: e.target.value })}
+          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
+        />
+      </div>
+
+      <div>
+        <label className="text-xs text-slate-400 block mb-1">Público-Alvo</label>
+        <input
+          type="text"
+          value={formData.target_audience}
+          onChange={(e) => setFormData({ ...formData, target_audience: e.target.value })}
+          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
+        />
+      </div>
+
+      <div>
+        <label className="text-xs text-slate-400 block mb-1">Tom de Voz</label>
+        <input
+          type="text"
+          value={formData.brand_voice}
+          onChange={(e) => setFormData({ ...formData, brand_voice: e.target.value })}
+          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800">
+        <div>
+          <label className="text-xs text-slate-300 font-semibold block mb-1">
+            Envio no Zap 📱
+          </label>
+          <input
+            type="time"
+            value={formData.whatsapp_delivery_time}
+            onChange={(e) => setFormData({ ...formData, whatsapp_delivery_time: e.target.value })}
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+          />
+          <span className="text-[10px] text-slate-500 mt-1 block">
+            Horário que o robô envia no seu WhatsApp
+          </span>
+        </div>
+
+        <div>
+          <label className="text-xs text-slate-300 font-semibold block mb-1">
+            Postar no Insta ⏰
+          </label>
+          <input
+            type="time"
+            value={formData.preferred_post_time}
+            onChange={(e) => setFormData({ ...formData, preferred_post_time: e.target.value })}
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+          />
+          <span className="text-[10px] text-slate-500 mt-1 block">
+            Horário agendado para o post ir ao ar
+          </span>
+        </div>
+      </div>
+
+      <div className="space-y-1.5 pt-2 border-t border-slate-800">
+        <div className="flex items-center justify-between">
+          <label className="text-xs text-slate-300 font-semibold">Formato Padrão da Imagem</label>
+          <span className="text-[10px] text-emerald-400 font-semibold">
+            {formData.image_aspect_ratio === '4:5'
+              ? '4:5 Retrato Feed (Mais Usado)'
+              : formData.image_aspect_ratio === '9:16'
+              ? '9:16 Vertical (Stories/Reels)'
+              : '1:1 Quadrado Tradicional'}
+          </span>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <button
+            type="button"
+            onClick={() => setFormData({ ...formData, image_aspect_ratio: '4:5' })}
+            className={`py-2 px-2 rounded-xl border text-center transition flex flex-col items-center justify-center gap-0.5 ${
+              formData.image_aspect_ratio === '4:5'
+                ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-bold'
+                : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-850'
+            }`}
+          >
+            <span className="text-xs">4:5 Retrato</span>
+            <span className="text-[10px] text-slate-500">1080x1350</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setFormData({ ...formData, image_aspect_ratio: '9:16' })}
+            className={`py-2 px-2 rounded-xl border text-center transition flex flex-col items-center justify-center gap-0.5 ${
+              formData.image_aspect_ratio === '9:16'
+                ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-bold'
+                : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-850'
+            }`}
+          >
+            <span className="text-xs">9:16 Vertical</span>
+            <span className="text-[10px] text-slate-500">1080x1920</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setFormData({ ...formData, image_aspect_ratio: '1:1' })}
+            className={`py-2 px-2 rounded-xl border text-center transition flex flex-col items-center justify-center gap-0.5 ${
+              formData.image_aspect_ratio === '1:1'
+                ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-bold'
+                : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-850'
+            }`}
+          >
+            <span className="text-xs">1:1 Quadrado</span>
+            <span className="text-[10px] text-slate-500">1080x1080</span>
+          </button>
+        </div>
+      </div>
+
+      <button
+        type="submit"
+        className="w-full py-2.5 rounded-xl font-bold text-xs bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition"
+      >
+        Salvar Diretrizes de Marca &amp; Horários
+      </button>
+    </form>
+  );
+
+  const renderMetaApiCard = () => (
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+      <div className="flex items-center justify-between">
+        <h4 className="text-sm font-bold text-white flex items-center gap-2">
+          <Share2 className="w-4 h-4 text-emerald-400" />
+          Publicação Direta (Meta Graph API)
+        </h4>
+        <span
+          className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+            isMetaConnected
+              ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+              : 'bg-slate-800 text-slate-400 border border-slate-700'
+          }`}
+        >
+          {isMetaConnected ? 'Conectado' : 'Opcional'}
+        </span>
+      </div>
+
+      <p className="text-xs text-slate-400 leading-relaxed">
+        Permite enviar a foto e a legenda direto para o feed com 1 clique. Caso prefira o modo Copiloto, basta copiar a legenda e baixar a foto gerada.
+      </p>
+
+      {isMetaConnected ? (
+        <div className="p-4 rounded-xl bg-emerald-950/20 border border-emerald-500/30 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-xs text-emerald-300 font-semibold">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            <span>Conta vinculada (@{account?.account_username || 'oficial'})</span>
+          </div>
+          <button
+            onClick={handleDisconnectMeta}
+            disabled={isConnectingMeta}
+            className="px-3 py-1.5 rounded-lg border border-rose-500/40 text-rose-300 hover:bg-rose-500/10 text-xs font-semibold transition"
+          >
+            Desconectar
+          </button>
+        </div>
+      ) : (
+        <form onSubmit={handleConnectMeta} className="space-y-3">
+          <div>
+            <label className="text-xs text-slate-400 block mb-1">Instagram Business Account ID</label>
+            <input
+              type="text"
+              value={metaBusinessId}
+              onChange={(e) => setMetaBusinessId(e.target.value)}
+              placeholder="Ex: 17841405309211..."
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-slate-400 block mb-1">Meta User Access Token (Long-Lived)</label>
+            <input
+              type="password"
+              value={metaAccessToken}
+              onChange={(e) => setMetaAccessToken(e.target.value)}
+              placeholder="EAABwz..."
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={isConnectingMeta}
+            className="w-full py-2.5 rounded-xl font-bold text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 transition"
+          >
+            {isConnectingMeta ? 'Validando...' : 'Conectar Conta da Meta'}
+          </button>
+        </form>
+      )}
+    </div>
+  );
+
+  if (onlySettings) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2">
+            <InstagramIcon className="w-6 h-6 text-pink-400" />
+            Configurações Instagram
+          </h2>
+          <p className="text-slate-400 text-sm mt-1">
+            Defina o DNA da sua marca, nicho, horários de postagem automática e conexão direta com a Meta Graph API.
+          </p>
+        </div>
+
+        {feedbackMsg && (
+          <div
+            className={`p-4 rounded-2xl flex items-center justify-between gap-3 text-xs sm:text-sm font-medium border ${
+              feedbackMsg.type === 'success'
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              {feedbackMsg.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+              ) : (
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+              )}
+              <span>{feedbackMsg.text}</span>
+            </div>
+            <button onClick={() => setFeedbackMsg(null)} className="p-1 hover:text-white transition">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          <div className="lg:col-span-7">
+            {renderBrandSettingsCard()}
+          </div>
+          <div className="lg:col-span-5">
+            {renderMetaApiCard()}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Banner de Feedback Global */}
@@ -868,49 +1137,6 @@ export default function InstagramAgentManager() {
                 {formData.approval_mode === 'auto_scheduled' ? 'PILOTO AUTOMÁTICO: LIGADO' : 'MODO COPILOTO (ZAP)'}
               </span>
             </button>
-          </div>
-        </div>
-
-        {/* 4 Tarefas Executadas pela IA */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800/80 flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
-              <Check className="w-4 h-4 stroke-[3]" />
-            </div>
-            <div>
-              <span className="text-xs font-bold text-white block">Postar</span>
-              <span className="text-[10px] text-slate-400 block">Foto IA + Ganchos</span>
-            </div>
-          </div>
-
-          <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800/80 flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
-              <Check className="w-4 h-4 stroke-[3]" />
-            </div>
-            <div>
-              <span className="text-xs font-bold text-white block">Comentar</span>
-              <span className="text-[10px] text-slate-400 block">Atração &quot;DE OUTRAS&quot;</span>
-            </div>
-          </div>
-
-          <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800/80 flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
-              <Check className="w-4 h-4 stroke-[3]" />
-            </div>
-            <div>
-              <span className="text-xs font-bold text-white block">Responder</span>
-              <span className="text-[10px] text-slate-400 block">DMs &amp; Leads no Zap</span>
-            </div>
-          </div>
-
-          <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800/80 flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
-              <Check className="w-4 h-4 stroke-[3]" />
-            </div>
-            <div>
-              <span className="text-xs font-bold text-white block">Planejar</span>
-              <span className="text-[10px] text-slate-400 block">Grade de 7 Dias</span>
-            </div>
           </div>
         </div>
 
@@ -1047,7 +1273,7 @@ export default function InstagramAgentManager() {
           }`}
         >
           <Sliders className="w-4 h-4" />
-          <span>Estratégia &amp; Conexão</span>
+          <span>Estratégia</span>
         </button>
       </div>
 
@@ -1936,225 +2162,8 @@ export default function InstagramAgentManager() {
 
           {/* Coluna 2: Configurações de Marca & Meta API */}
           <div className="lg:col-span-6 space-y-6">
-            {/* Tom de Voz e DNA */}
-            <form onSubmit={handleSaveSettings} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
-              <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                <Sliders className="w-4 h-4 text-emerald-400" />
-                Voz da Marca &amp; Nicho
-              </h4>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Nome da Empresa</label>
-                  <input
-                    type="text"
-                    value={formData.account_name}
-                    onChange={(e) => setFormData({ ...formData, account_name: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">@ do Instagram</label>
-                  <input
-                    type="text"
-                    value={formData.account_username}
-                    onChange={(e) => setFormData({ ...formData, account_username: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-400 block mb-1">Nicho de Atuação</label>
-                <input
-                  type="text"
-                  value={formData.niche}
-                  onChange={(e) => setFormData({ ...formData, niche: e.target.value })}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-400 block mb-1">Público-Alvo</label>
-                <input
-                  type="text"
-                  value={formData.target_audience}
-                  onChange={(e) => setFormData({ ...formData, target_audience: e.target.value })}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-400 block mb-1">Tom de Voz</label>
-                <input
-                  type="text"
-                  value={formData.brand_voice}
-                  onChange={(e) => setFormData({ ...formData, brand_voice: e.target.value })}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800">
-                <div>
-                  <label className="text-xs text-slate-300 font-semibold block mb-1">
-                    Envio no Zap 📱
-                  </label>
-                  <input
-                    type="time"
-                    value={formData.whatsapp_delivery_time}
-                    onChange={(e) => setFormData({ ...formData, whatsapp_delivery_time: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-                  />
-                  <span className="text-[10px] text-slate-500 mt-1 block">
-                    Horário que o robô envia no seu WhatsApp
-                  </span>
-                </div>
-
-                <div>
-                  <label className="text-xs text-slate-300 font-semibold block mb-1">
-                    Postar no Insta ⏰
-                  </label>
-                  <input
-                    type="time"
-                    value={formData.preferred_post_time}
-                    onChange={(e) => setFormData({ ...formData, preferred_post_time: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-                  />
-                  <span className="text-[10px] text-slate-500 mt-1 block">
-                    Horário agendado para o post ir ao ar
-                  </span>
-                </div>
-              </div>
-
-              <div className="space-y-1.5 pt-2 border-t border-slate-800">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs text-slate-300 font-semibold">Formato Padrão da Imagem</label>
-                  <span className="text-[10px] text-emerald-400 font-semibold">
-                    {formData.image_aspect_ratio === '4:5'
-                      ? '4:5 Retrato Feed (Mais Usado)'
-                      : formData.image_aspect_ratio === '9:16'
-                      ? '9:16 Vertical (Stories/Reels)'
-                      : '1:1 Quadrado Tradicional'}
-                  </span>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, image_aspect_ratio: '4:5' })}
-                    className={`py-2 px-2 rounded-xl border text-center transition flex flex-col items-center justify-center gap-0.5 ${
-                      formData.image_aspect_ratio === '4:5'
-                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-bold'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-850'
-                    }`}
-                  >
-                    <span className="text-xs">4:5 Retrato</span>
-                    <span className="text-[10px] text-slate-500">1080x1350</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, image_aspect_ratio: '9:16' })}
-                    className={`py-2 px-2 rounded-xl border text-center transition flex flex-col items-center justify-center gap-0.5 ${
-                      formData.image_aspect_ratio === '9:16'
-                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-bold'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-850'
-                    }`}
-                  >
-                    <span className="text-xs">9:16 Vertical</span>
-                    <span className="text-[10px] text-slate-500">1080x1920</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, image_aspect_ratio: '1:1' })}
-                    className={`py-2 px-2 rounded-xl border text-center transition flex flex-col items-center justify-center gap-0.5 ${
-                      formData.image_aspect_ratio === '1:1'
-                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-bold'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-850'
-                    }`}
-                  >
-                    <span className="text-xs">1:1 Quadrado</span>
-                    <span className="text-[10px] text-slate-500">1080x1080</span>
-                  </button>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-2.5 rounded-xl font-bold text-xs bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition"
-              >
-                Salvar Diretrizes de Marca &amp; Horários
-              </button>
-            </form>
-
-            {/* Conexão Meta Graph API (Opcional) */}
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
-              <div className="flex items-center justify-between">
-                <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Share2 className="w-4 h-4 text-emerald-400" />
-                  Publicação Direta (Meta Graph API)
-                </h4>
-                <span
-                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                    isMetaConnected
-                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                      : 'bg-slate-800 text-slate-400 border border-slate-700'
-                  }`}
-                >
-                  {isMetaConnected ? 'Conectado' : 'Opcional'}
-                </span>
-              </div>
-
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Permite enviar a foto e a legenda direto para o feed com 1 clique. Caso prefira o modo Copiloto, basta copiar a legenda e baixar a foto gerada.
-              </p>
-
-              {isMetaConnected ? (
-                <div className="p-4 rounded-xl bg-emerald-950/20 border border-emerald-500/30 flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-xs text-emerald-300 font-semibold">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                    <span>Conta vinculada (@{account?.account_username || 'oficial'})</span>
-                  </div>
-                  <button
-                    onClick={handleDisconnectMeta}
-                    disabled={isConnectingMeta}
-                    className="px-3 py-1.5 rounded-lg border border-rose-500/40 text-rose-300 hover:bg-rose-500/10 text-xs font-semibold transition"
-                  >
-                    Desconectar
-                  </button>
-                </div>
-              ) : (
-                <form onSubmit={handleConnectMeta} className="space-y-3">
-                  <div>
-                    <label className="text-xs text-slate-400 block mb-1">Instagram Business Account ID</label>
-                    <input
-                      type="text"
-                      value={metaBusinessId}
-                      onChange={(e) => setMetaBusinessId(e.target.value)}
-                      placeholder="Ex: 17841405309211..."
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-400 block mb-1">Meta User Access Token (Long-Lived)</label>
-                    <input
-                      type="password"
-                      value={metaAccessToken}
-                      onChange={(e) => setMetaAccessToken(e.target.value)}
-                      placeholder="EAABwz..."
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={isConnectingMeta}
-                    className="w-full py-2.5 rounded-xl font-bold text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 transition"
-                  >
-                    {isConnectingMeta ? 'Validando...' : 'Conectar Conta da Meta'}
-                  </button>
-                </form>
-              )}
-            </div>
+            {renderBrandSettingsCard()}
+            {renderMetaApiCard()}
           </div>
         </div>
       )}

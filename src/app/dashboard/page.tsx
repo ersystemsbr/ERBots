@@ -10,7 +10,6 @@ import LiveChat from '@/components/LiveChat';
 import SubscriptionPlans from '@/components/SubscriptionPlans';
 import UserProfileManager from '@/components/UserProfileManager';
 import AnalyticsDashboard from '@/components/AnalyticsDashboard';
-import OnboardingChecklist from '@/components/OnboardingChecklist';
 import ErSystemsAppsDashboard from '@/components/ErSystemsAppsDashboard';
 import InstagramAgentManager, { InstagramIcon } from '@/components/InstagramAgentManager';
 import IntegrationsManager from '@/components/IntegrationsManager';
@@ -29,6 +28,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const [currentTab, setCurrentTab] = useState<string>('chat');
   const [settingsSubTab, setSettingsSubTab] = useState<string>('whatsapp');
+  const [waActiveCard, setWaActiveCard] = useState<'connection' | 'bot' | 'knowledge'>('connection');
   const [tenant, setTenant] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [isConnected, setIsConnected] = useState<boolean>(false);
@@ -36,11 +36,9 @@ export default function DashboardPage() {
   const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(false);
 
   const settingsTabs = [
-    { id: 'whatsapp', label: 'Conexão WhatsApp', icon: Bot },
-    { id: 'bot-settings', label: 'Personalizar IA', icon: Sparkles },
-    { id: 'knowledge', label: 'Base de Conhecimento', icon: BookOpen },
+    { id: 'whatsapp', label: 'Configurações WhatsApp', icon: Bot },
+    { id: 'instagram', label: 'Configurações Instagram', icon: InstagramIcon },
     { id: 'integrations', label: 'Integrações (PDV/ERP)', icon: Layers },
-    { id: 'instagram', label: 'Agente Instagram', icon: InstagramIcon },
     { id: 'plans', label: 'Planos & Assinaturas', icon: ShieldCheck },
     { id: 'profile', label: 'Dados da Empresa', icon: Building2 },
   ];
@@ -48,7 +46,19 @@ export default function DashboardPage() {
   const handleNavigate = (tab: string) => {
     if (tab === 'instagram') {
       setCurrentTab('instagram');
-    } else if (['whatsapp', 'bot-settings', 'knowledge', 'integrations', 'plans', 'profile'].includes(tab)) {
+    } else if (tab === 'whatsapp' || tab === 'connection') {
+      setCurrentTab('settings');
+      setSettingsSubTab('whatsapp');
+      setWaActiveCard('connection');
+    } else if (tab === 'bot-settings') {
+      setCurrentTab('settings');
+      setSettingsSubTab('whatsapp');
+      setWaActiveCard('bot');
+    } else if (tab === 'knowledge') {
+      setCurrentTab('settings');
+      setSettingsSubTab('whatsapp');
+      setWaActiveCard('knowledge');
+    } else if (['integrations', 'plans', 'profile'].includes(tab)) {
       setCurrentTab('settings');
       setSettingsSubTab(tab);
     } else {
@@ -242,18 +252,9 @@ export default function DashboardPage() {
         {/* ABA: Apps ER Systems (Ecossistema de Soluções) */}
         {currentTab === 'apps' && <ErSystemsAppsDashboard />}
 
-        {/* ABA: Configurações (com Guia Rápido exclusivo e sub-abas no formato do Painel Master) */}
+        {/* ABA: Configurações */}
         {currentTab === 'settings' && (
           <div className="space-y-6">
-            {/* Card do Guia Rápido de Ativação (exclusivo dentro de Configurações) */}
-            {tenantId && (
-              <OnboardingChecklist
-                tenantId={tenantId}
-                isConnected={isConnected}
-                onNavigateTab={handleNavigate}
-              />
-            )}
-
             {/* Navegação por Sub-Abas no mesmo formato das abas do Painel Master */}
             <div className="flex border-b border-slate-800 space-x-6 sm:space-x-8 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
               {settingsTabs.map((tab) => {
@@ -278,37 +279,154 @@ export default function DashboardPage() {
 
             {/* Conteúdo da Sub-Aba de Configurações ativa */}
             <div>
+              {/* SUB-ABA: Configurações WhatsApp (Hub em formato de 3 Cards) */}
               {settingsSubTab === 'whatsapp' && (
-                <WhatsAppConnector
-                  tenantId={tenantId}
-                  tenantSlug={tenantSlug}
-                  onStatusChange={(connected) => {
-                    setIsConnected(connected);
-                    if (connected) setUnexpectedDisconnect(false);
-                  }}
-                />
+                <div className="space-y-6">
+                  {/* 3 Cards de Seleção WhatsApp */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* Card 1: Conexão WhatsApp */}
+                    <button
+                      type="button"
+                      onClick={() => setWaActiveCard('connection')}
+                      className={`p-5 rounded-2xl border text-left transition shadow-md flex flex-col justify-between relative overflow-hidden ${
+                        waActiveCard === 'connection'
+                          ? 'bg-slate-900 border-emerald-500/60 ring-2 ring-emerald-500/20'
+                          : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full mb-3">
+                        <div
+                          className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                            waActiveCard === 'connection'
+                              ? 'bg-emerald-500/20 text-emerald-400'
+                              : 'bg-slate-800 text-slate-400'
+                          }`}
+                        >
+                          <Bot className="w-5 h-5" />
+                        </div>
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                            isConnected
+                              ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                              : 'bg-slate-800 text-slate-400 border-slate-700'
+                          }`}
+                        >
+                          {isConnected ? '● Conectado' : '○ Desconectado'}
+                        </span>
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-white">Conexão WhatsApp</h4>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          QR Code, status do pareamento e número ativo
+                        </p>
+                      </div>
+                    </button>
+
+                    {/* Card 2: Personalizar IA */}
+                    <button
+                      type="button"
+                      onClick={() => setWaActiveCard('bot')}
+                      className={`p-5 rounded-2xl border text-left transition shadow-md flex flex-col justify-between relative overflow-hidden ${
+                        waActiveCard === 'bot'
+                          ? 'bg-slate-900 border-emerald-500/60 ring-2 ring-emerald-500/20'
+                          : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full mb-3">
+                        <div
+                          className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                            waActiveCard === 'bot'
+                              ? 'bg-emerald-500/20 text-emerald-400'
+                              : 'bg-slate-800 text-slate-400'
+                          }`}
+                        >
+                          <Sparkles className="w-5 h-5" />
+                        </div>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                          Atendente Virtual
+                        </span>
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-white">Personalizar IA</h4>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          Tom de voz, instruções, nome e prompt do atendente
+                        </p>
+                      </div>
+                    </button>
+
+                    {/* Card 3: Base de Conhecimento */}
+                    <button
+                      type="button"
+                      onClick={() => setWaActiveCard('knowledge')}
+                      className={`p-5 rounded-2xl border text-left transition shadow-md flex flex-col justify-between relative overflow-hidden ${
+                        waActiveCard === 'knowledge'
+                          ? 'bg-slate-900 border-emerald-500/60 ring-2 ring-emerald-500/20'
+                          : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full mb-3">
+                        <div
+                          className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                            waActiveCard === 'knowledge'
+                              ? 'bg-emerald-500/20 text-emerald-400'
+                              : 'bg-slate-800 text-slate-400'
+                          }`}
+                        >
+                          <BookOpen className="w-5 h-5" />
+                        </div>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                          Respostas Prontas
+                        </span>
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-white">Base de Conhecimento</h4>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          Cardápio, FAQs, horários, preços e políticas
+                        </p>
+                      </div>
+                    </button>
+                  </div>
+
+                  {/* Conteúdo do Card Ativo */}
+                  <div className="pt-2">
+                    {waActiveCard === 'connection' && (
+                      <WhatsAppConnector
+                        tenantId={tenantId}
+                        tenantSlug={tenantSlug}
+                        onStatusChange={(connected) => {
+                          setIsConnected(connected);
+                          if (connected) setUnexpectedDisconnect(false);
+                        }}
+                      />
+                    )}
+
+                    {waActiveCard === 'bot' && (
+                      <BotSettingsForm tenantId={tenantId} />
+                    )}
+
+                    {waActiveCard === 'knowledge' && (
+                      <KnowledgeBaseManager tenantId={tenantId} tenantSegment={tenant?.segment} />
+                    )}
+                  </div>
+                </div>
               )}
 
-              {settingsSubTab === 'bot-settings' && (
-                <BotSettingsForm tenantId={tenantId} />
+              {/* SUB-ABA: Configurações Instagram (Cards de Voz da Marca & Meta Graph API) */}
+              {settingsSubTab === 'instagram' && (
+                <InstagramAgentManager onlySettings={true} />
               )}
 
-              {settingsSubTab === 'knowledge' && (
-                <KnowledgeBaseManager tenantId={tenantId} tenantSegment={tenant?.segment} />
-              )}
-
+              {/* SUB-ABA: Integrações */}
               {settingsSubTab === 'integrations' && (
                 <IntegrationsManager tenantId={tenantId} isSuperAdmin={isSuperAdmin} />
               )}
 
-              {settingsSubTab === 'instagram' && (
-                <InstagramAgentManager />
-              )}
-
+              {/* SUB-ABA: Planos & Assinaturas */}
               {settingsSubTab === 'plans' && (
                 <SubscriptionPlans tenant={tenant} onTenantUpdated={setTenant} />
               )}
 
+              {/* SUB-ABA: Dados da Empresa */}
               {settingsSubTab === 'profile' && (
                 <UserProfileManager
                   tenant={tenant}
