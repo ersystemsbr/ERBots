@@ -24,9 +24,9 @@ export default function WhatsAppConnector({ tenantId, tenantSlug, onStatusChange
   const [testSending, setTestSending] = useState<boolean>(false);
   const [testResult, setTestResult] = useState<string | null>(null);
 
-  const fetchStatus = async (action: 'STATUS' | 'CONNECT' = 'STATUS') => {
+  const fetchStatus = async (action: 'STATUS' | 'CONNECT' = 'STATUS', isSilent = false) => {
     if (!tenantId) return;
-    setLoading(true);
+    if (!isSilent) setLoading(true);
     try {
       const res = await authFetch('/api/whatsapp/instance', {
         method: 'POST',
@@ -36,9 +36,13 @@ export default function WhatsAppConnector({ tenantId, tenantSlug, onStatusChange
       const data = await res.json();
       if (res.ok) {
         setStatus(data.status);
-        setQrcode(data.qrcode);
-        setPhone(data.phone);
-        setProfileName(data.profileName);
+        if (data.qrcode) {
+          setQrcode(data.qrcode);
+        } else if (data.status === 'CONNECTED') {
+          setQrcode(null);
+        }
+        if (data.phone) setPhone(data.phone);
+        if (data.profileName) setProfileName(data.profileName);
         setInstanceName(data.instanceName || `erbots_${tenantSlug}`);
         if (onStatusChange) {
           onStatusChange(data.status === 'CONNECTED');
@@ -47,7 +51,7 @@ export default function WhatsAppConnector({ tenantId, tenantSlug, onStatusChange
     } catch (err) {
       console.error('Erro ao verificar status:', err);
     } finally {
-      setLoading(false);
+      if (!isSilent) setLoading(false);
     }
   };
 
@@ -141,12 +145,12 @@ export default function WhatsAppConnector({ tenantId, tenantSlug, onStatusChange
     };
   }, [tenantId]);
 
-  // Polling de contingência para detectar leitura do QR Code caso WebSocket oscile
+  // Polling silencioso de contingência para detectar leitura do QR Code caso WebSocket oscile
   useEffect(() => {
     if (status === 'QRCODE') {
       const timer = setInterval(() => {
-        fetchStatus('STATUS');
-      }, 6000);
+        fetchStatus('STATUS', true);
+      }, 4000);
       return () => clearInterval(timer);
     }
   }, [status, tenantId]);

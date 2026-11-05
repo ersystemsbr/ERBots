@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
-import { createOrGetInstance, logoutInstance } from '@/lib/evolution';
+import { createOrGetInstance, logoutInstance, getInstanceConnectionState } from '@/lib/evolution';
 import { requireTenantAccess } from '@/lib/auth';
 import { buildWebhookUrl } from '@/lib/webhook';
 import { logSystemEvent } from '@/lib/monitoring';
@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
     // Nome da instância ESTÁVEL: reaproveita o já cadastrado; para novas, deriva do ID (não do slug editável)
     const { data: existingInstance } = await supabase
       .from('xerb_instances')
-      .select('instance_name, last_connected_at, intentional_logout')
+      .select('instance_name, status, phone_connected, profile_name, last_connected_at, intentional_logout')
       .eq('tenant_id', tenant.id)
       .order('created_at', { ascending: true })
       .limit(1)
@@ -69,7 +69,47 @@ export async function POST(req: NextRequest) {
     const instanceName =
       existingInstance?.instance_name || `erbots_${tenant.id.replace(/-/g, '').slice(0, 16)}`;
 
-    if (action === 'CONNECT' || action === 'STATUS') {
+    if (action === 'STATUS') {
+      const conn = await getInstanceConnectionState(instanceName);
+      const nowIso = new Date().toISOString();
+      const isConnected = conn.state === 'open';
+
+      if (isConnected) {
+        await supabase.from('xerb_instances').upsert(
+          {
+            tenant_id: tenant.id,
+            instance_name: instanceName,
+            status: 'CONNECTED',
+            phone_connected: conn.phone || existingInstance?.phone_connected || null,
+            profile_name: conn.profileName || existingInstance?.profile_name || null,
+            last_connected_at: existingInstance?.last_connected_at || nowIso,
+            disconnected_at: null,
+            intentional_logout: false,
+            updated_at: nowIso,
+          },
+          { onConflict: 'instance_name' }
+        );
+
+        return NextResponse.json({
+          instanceName,
+          status: 'CONNECTED',
+          phone: conn.phone || existingInstance?.phone_connected || null,
+          profileName: conn.profileName || existingInstance?.profile_name || null,
+          qrcode: null,
+        });
+      }
+
+      // Se ainda não conectou, preserva o status atual sem alterar nada e sem recriar QR code
+      return NextResponse.json({
+        instanceName,
+        status: existingInstance?.status || (conn.state === 'connecting' ? 'QRCODE' : 'DISCONNECTED'),
+        phone: existingInstance?.phone_connected || null,
+        profileName: existingInstance?.profile_name || null,
+        qrcode: null,
+      });
+    }
+
+    if (action === 'CONNECT') {
       const webhookUrl = buildWebhookUrl(req);
       const instanceState = await createOrGetInstance(instanceName, webhookUrl);
       const nowIso = new Date().toISOString();
@@ -85,7 +125,7 @@ export async function POST(req: NextRequest) {
           profile_name: instanceState.profileName || null,
           last_connected_at: isConnected ? nowIso : existingInstance?.last_connected_at || null,
           disconnected_at: isConnected ? null : undefined,
-          intentional_logout: action === 'CONNECT' || isConnected ? false : Boolean(existingInstance?.intentional_logout),
+          intentional_logout: isConnected ? false : Boolean(existingInstance?.intentional_logout),
           updated_at: nowIso,
         },
         { onConflict: 'instance_name' }

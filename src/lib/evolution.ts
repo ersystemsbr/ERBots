@@ -168,7 +168,24 @@ export async function createOrGetInstance(
     };
   }
 
-  // Se já existe, checa conexão ou gera novo QR
+  // Se já existe e já está conectada, retorna imediatamente sem chamar /instance/connect
+  const isAlreadyConnected =
+    existing?.connectionStatus === 'open' ||
+    existing?.instance?.state === 'open';
+
+  if (isAlreadyConnected) {
+    const owner = existing?.ownerJid || existing?.instance?.owner || '';
+    const phone = owner.split('@')[0];
+    const profileName = existing?.profileName || existing?.instance?.profileName || null;
+    await registerWebhook();
+    return {
+      status: 'CONNECTED',
+      phone,
+      profileName,
+    };
+  }
+
+  // Se não está conectada, conecta e gera o QR Code
   const connRes = await fetch(`${apiUrl}/instance/connect/${instanceName}`, {
     headers: { apikey: apiKey },
     cache: 'no-store',
@@ -198,6 +215,54 @@ export async function createOrGetInstance(
     status: 'QRCODE',
     qrcode,
   };
+}
+
+/**
+ * Consulta de forma puramente passiva o estado da instância na Evolution API.
+ * NUNCA gera novo QR Code e NUNCA invalida o token existente no WhatsApp.
+ */
+export async function getInstanceConnectionState(
+  instanceName: string
+): Promise<{ state: 'open' | 'connecting' | 'close'; phone?: string | null; profileName?: string | null }> {
+  const { apiUrl, apiKey } = await getEvolutionConfig();
+  if (!apiUrl || !apiKey || !instanceName) return { state: 'close' };
+
+  try {
+    const res = await fetch(`${apiUrl}/instance/connectionState/${encodeURIComponent(instanceName)}`, {
+      headers: { apikey: apiKey },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return { state: 'close' };
+    const data = await res.json();
+    const state = (data?.instance?.state || data?.state || 'close') as 'open' | 'connecting' | 'close';
+
+    let phone: string | null = null;
+    let profileName: string | null = null;
+
+    if (state === 'open') {
+      try {
+        const instRes = await fetch(`${apiUrl}/instance/fetchInstances?instanceName=${encodeURIComponent(instanceName)}`, {
+          headers: { apikey: apiKey },
+          cache: 'no-store',
+          signal: AbortSignal.timeout(5000),
+        });
+        if (instRes.ok) {
+          const instData = await instRes.json();
+          const target = Array.isArray(instData)
+            ? instData.find((i: any) => i.name === instanceName || i.instance?.instanceName === instanceName)
+            : null;
+          const owner = target?.ownerJid || target?.instance?.owner || '';
+          if (owner) phone = owner.split('@')[0];
+          profileName = target?.profileName || target?.instance?.profileName || null;
+        }
+      } catch {}
+    }
+
+    return { state, phone, profileName };
+  } catch {
+    return { state: 'close' };
+  }
 }
 
 /**
