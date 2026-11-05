@@ -13,10 +13,11 @@ import AnalyticsDashboard from '@/components/AnalyticsDashboard';
 import OnboardingChecklist from '@/components/OnboardingChecklist';
 import ErSystemsAppsDashboard from '@/components/ErSystemsAppsDashboard';
 import InstagramAgentManager, { InstagramIcon } from '@/components/InstagramAgentManager';
+import IntegrationsManager from '@/components/IntegrationsManager';
 import { supabase } from '@/lib/supabase';
 import { authFetch } from '@/lib/api-client';
 import { getAccessState } from '@/lib/plans';
-import { Loader2, WifiOff, Bot, Sparkles, BookOpen, ShieldCheck, Building2 } from 'lucide-react';
+import { Loader2, WifiOff, Bot, Sparkles, BookOpen, ShieldCheck, Building2, Layers } from 'lucide-react';
 
 interface InstanceSnapshot {
   status: string;
@@ -38,6 +39,7 @@ export default function DashboardPage() {
     { id: 'whatsapp', label: 'Conexão WhatsApp', icon: Bot },
     { id: 'bot-settings', label: 'Personalizar IA', icon: Sparkles },
     { id: 'knowledge', label: 'Base de Conhecimento', icon: BookOpen },
+    { id: 'integrations', label: 'Integrações (PDV/ERP)', icon: Layers },
     { id: 'instagram', label: 'Agente Instagram', icon: InstagramIcon },
     { id: 'plans', label: 'Planos & Assinaturas', icon: ShieldCheck },
     { id: 'profile', label: 'Dados da Empresa', icon: Building2 },
@@ -46,7 +48,7 @@ export default function DashboardPage() {
   const handleNavigate = (tab: string) => {
     if (tab === 'instagram') {
       setCurrentTab('instagram');
-    } else if (['whatsapp', 'bot-settings', 'knowledge', 'plans', 'profile'].includes(tab)) {
+    } else if (['whatsapp', 'bot-settings', 'knowledge', 'integrations', 'plans', 'profile'].includes(tab)) {
       setCurrentTab('settings');
       setSettingsSubTab(tab);
     } else {
@@ -293,6 +295,10 @@ export default function DashboardPage() {
 
               {settingsSubTab === 'knowledge' && (
                 <KnowledgeBaseManager tenantId={tenantId} tenantSegment={tenant?.segment} />
+              )}
+
+              {settingsSubTab === 'integrations' && (
+                <IntegrationsManager tenantId={tenantId} isSuperAdmin={isSuperAdmin} />
               )}
 
               {settingsSubTab === 'instagram' && (

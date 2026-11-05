@@ -147,31 +147,140 @@ interface ProfileAudit {
   cta_link_suggestion: string;
 }
 
+export const SKILLS_11 = [
+  {
+    number: '01',
+    name: 'Fábrica de Posts',
+    command: '/ig-caption',
+    description: 'Cria posts completos com ganchos comprovados, copy magnética, hashtags estratégicas e CTA para o WhatsApp.',
+    category: 'Criação',
+  },
+  {
+    number: '02',
+    name: 'Comentários de Atração ("DE OUTRAS")',
+    command: '/ig-comment',
+    description: 'Analisa publicações de concorrentes e referências do nicho e gera comentários de alto valor para atrair seguidores qualificados.',
+    category: 'Atração',
+  },
+  {
+    number: '03',
+    name: 'Respostas & Conversão',
+    command: '/ig-reply',
+    description: 'Responde dúvidas e comentários com cordialidade e envia o link direto de conversão para o WhatsApp da sua empresa.',
+    category: 'Engajamento',
+  },
+  {
+    number: '04',
+    name: 'Auditoria de Bio & Perfil',
+    command: '/ig-profile',
+    description: 'Diagnostica e gera uma bio persuasiva no limite estrito de 150 caracteres com proposta clara de valor.',
+    category: 'Conversão',
+  },
+  {
+    number: '05',
+    name: 'Planejador Semanal 7 Dias',
+    command: '/ig-plan',
+    description: 'Monta a grade editorial completa nos 4 pilares estratégicos: Atração, Autoridade, Conexão e Venda.',
+    category: 'Estratégia',
+  },
+  {
+    number: '06',
+    name: 'Roteirista de Reels Virais',
+    command: '/ig-reel',
+    description: 'Estruturação de Reels de alta retenção com 26 fórmulas de ganchos (0-3s), beat sheet e textos na tela.',
+    category: 'Vídeo',
+  },
+  {
+    number: '07',
+    name: 'Laboratório Viral & Raio-X',
+    command: '/ig-viral',
+    description: 'Disseca conteúdos virais de outros perfis por @, link ou nicho e reconstrói um roteiro inédito para seu negócio.',
+    category: 'Inteligência',
+  },
+  {
+    number: '08',
+    name: 'Carrosséis Persuasivos',
+    command: '/ig-carousel',
+    description: 'Roteiros de carrossel slide a slide desenhados para gerar altos volumes de salvamentos e compartilhamentos.',
+    category: 'Criação',
+  },
+  {
+    number: '09',
+    name: 'Sequências de Stories Diários',
+    command: '/ig-story',
+    description: 'Roteiros de 3 a 5 stories diários com enquetes, bastidores e caixas de perguntas para aquecer a audiência.',
+    category: 'Engajamento',
+  },
+  {
+    number: '10',
+    name: 'Humanizador Anti-Clichês',
+    command: '/ig-human',
+    description: 'Remove marcas registradas de IA ("em um mundo veloz", "mergulhe fundo") e deixa a linguagem 100% autêntica.',
+    category: 'Qualidade',
+  },
+  {
+    number: '11',
+    name: 'Piloto Automático Diário',
+    command: '/ig-autopilot',
+    description: 'Acorda todo dia de manhã, cria a publicação do dia e entrega mastigada no seu WhatsApp para aprovação em 1 toque.',
+    category: 'Autonomia',
+  },
+];
+
 function cleanErrorMessage(raw: any, fallback = 'Ocorreu um erro ao processar.'): string {
   if (!raw) return fallback;
-  const str = typeof raw === 'string' ? raw : raw?.error || raw?.message || '';
-  if (!str) return fallback;
+
+  let str = '';
+  if (typeof raw === 'string') {
+    str = raw;
+  } else if (raw?.error?.message && typeof raw.error.message === 'string') {
+    str = raw.error.message;
+  } else if (typeof raw?.error === 'string') {
+    str = raw.error;
+  } else if (typeof raw?.message === 'string') {
+    str = raw.message;
+  } else {
+    try {
+      str = JSON.stringify(raw);
+    } catch {
+      str = String(raw);
+    }
+  }
 
   if (typeof str === 'string' && str.trim().startsWith('{')) {
     try {
       const parsed = JSON.parse(str);
-      if (parsed?.error?.message) {
-        return cleanErrorMessage(parsed.error.message, fallback);
-      }
-      if (parsed?.message) {
-        return cleanErrorMessage(parsed.message, fallback);
-      }
+      if (parsed?.error?.message) return cleanErrorMessage(parsed.error.message, fallback);
+      if (parsed?.error && typeof parsed.error === 'string') return cleanErrorMessage(parsed.error, fallback);
+      if (parsed?.message) return cleanErrorMessage(parsed.message, fallback);
     } catch {}
   }
 
-  if (str.includes('503') || str.toLowerCase().includes('high demand') || str.includes('UNAVAILABLE')) {
-    return 'Os servidores de IA do Google estão com alta demanda temporária. O sistema já tenta modelos alternativos automaticamente; por favor, aguarde alguns instantes e tente novamente.';
-  }
-  if (str.includes('429') || str.toLowerCase().includes('quota') || str.includes('resource_exhausted')) {
-    return 'Limite temporário de requisições atingido. Por favor, aguarde alguns segundos.';
+  const lower = str.toLowerCase();
+  if (
+    str.includes('503') ||
+    lower.includes('high demand') ||
+    str.includes('UNAVAILABLE') ||
+    lower.includes('overloaded')
+  ) {
+    return 'Os servidores de inteligência artificial do Google estão com alta demanda temporária. O sistema já tenta modelos alternativos automaticamente; por favor, aguarde alguns instantes e tente novamente.';
   }
 
-  return str;
+  if (
+    str.includes('429') ||
+    lower.includes('quota') ||
+    lower.includes('resource_exhausted') ||
+    lower.includes('rate limit')
+  ) {
+    return 'Limite temporário de requisições por minuto atingido. Por favor, aguarde alguns segundos e tente novamente.';
+  }
+
+  if (str.trim().startsWith('{') && str.includes('"message"')) {
+    const match = str.match(/"message"\s*:\s*"([^"]+)"/);
+    if (match && match[1]) return cleanErrorMessage(match[1], fallback);
+  }
+
+  return str.trim() || fallback;
 }
 
 export default function InstagramAgentManager() {
@@ -212,6 +321,7 @@ export default function InstagramAgentManager() {
   // Notificações e Cópia
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [showSkillsModal, setShowSkillsModal] = useState(false);
 
   // Conexão Meta Graph API
   const [metaBusinessId, setMetaBusinessId] = useState('');
@@ -680,9 +790,15 @@ export default function InstagramAgentManager() {
             <div>
               <h2 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2 tracking-tight">
                 Agente Autônomo de Instagram
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-pink-500/15 text-pink-300 border border-pink-500/30">
-                  Motor de Atração &amp; Conteúdo
-                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowSkillsModal(true)}
+                  className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-pink-500/15 text-pink-300 border border-pink-500/30 hover:bg-pink-500/25 transition flex items-center gap-1 cursor-pointer"
+                  title="Clique para ver as 11 skills do agente"
+                >
+                  <Sparkles className="w-3 h-3 text-pink-300" />
+                  <span>11 Skills Ativas</span>
+                </button>
               </h2>
               <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
                 Crie posts magnéticos com IA, disseque conteúdos virais e atraia clientes para o seu WhatsApp.
@@ -692,70 +808,197 @@ export default function InstagramAgentManager() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Toggle Rápido Piloto Automático vs Copiloto */}
+          {/* Botão de Ver as 11 Skills IA */}
           <button
-            onClick={handleToggleApprovalMode}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border transition text-xs font-semibold shadow-sm ${
-              formData.approval_mode === 'auto_scheduled'
-                ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25'
-                : 'bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20'
-            }`}
-            title="Clique para alternar entre Copiloto (Aprovação Zap) e Piloto Automático"
+            onClick={() => setShowSkillsModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-200 text-xs font-semibold transition flex items-center gap-1.5"
           >
-            <span
-              className={`w-2 h-2 rounded-full ${
-                formData.approval_mode === 'auto_scheduled' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
-              }`}
-            />
-            <span>
-              {formData.approval_mode === 'auto_scheduled' ? '⚡ Piloto Automático: LIGADO' : '📱 Modo Copiloto (Aprovação Zap)'}
-            </span>
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <span>Skills IA (11)</span>
           </button>
 
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300">
             <span
               className={`w-2 h-2 rounded-full ${isMetaConnected ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`}
             />
-            <span>{isMetaConnected ? 'Meta API Ativa' : 'Publicação Manual / Zap'}</span>
+            <span>{isMetaConnected ? 'Meta API Conectada' : 'Publicação Manual / Zap'}</span>
           </div>
         </div>
       </div>
 
-      {/* Banner Executivo de Automação Diária no WhatsApp */}
-      <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-emerald-950/40 via-slate-900 to-indigo-950/30 border border-emerald-500/30 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xl">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
-              Piloto Automático &amp; Rotina Diária no WhatsApp
+      {/* Central de Piloto Automático & Tarefas (Inspirado no Jake Schincariol Agent) */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xl space-y-5">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-800/80">
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-pink-500 via-rose-500 to-amber-500 flex items-center justify-center text-white shadow-lg shadow-pink-500/20 font-bold text-lg shrink-0">
+              {formData.account_username ? `@${formData.account_username.substring(0, 1).toUpperCase()}` : <InstagramIcon className="w-6 h-6 text-white" />}
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-base sm:text-lg font-extrabold text-white">
+                  @{formData.account_username || 'seu_perfil'}
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold">
+                  {formData.niche || 'Comércio & Serviços'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">
+                {formData.account_name || 'Agente de Conteúdo & Conversão'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* Switch Piloto Automático vs Copiloto */}
+            <button
+              onClick={handleToggleApprovalMode}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-bold transition shadow-sm ${
+                formData.approval_mode === 'auto_scheduled'
+                  ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25'
+                  : 'bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20'
+              }`}
+              title="Clique para alternar entre Piloto Automático e Modo Copiloto"
+            >
+              <span
+                className={`w-2.5 h-2.5 rounded-full ${
+                  formData.approval_mode === 'auto_scheduled' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+                }`}
+              />
+              <span>
+                {formData.approval_mode === 'auto_scheduled' ? 'PILOTO AUTOMÁTICO: LIGADO' : 'MODO COPILOTO (ZAP)'}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {/* 4 Tarefas Executadas pela IA */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800/80 flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+              <Check className="w-4 h-4 stroke-[3]" />
+            </div>
+            <div>
+              <span className="text-xs font-bold text-white block">Postar</span>
+              <span className="text-[10px] text-slate-400 block">Foto IA + Ganchos</span>
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800/80 flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+              <Check className="w-4 h-4 stroke-[3]" />
+            </div>
+            <div>
+              <span className="text-xs font-bold text-white block">Comentar</span>
+              <span className="text-[10px] text-slate-400 block">Atração &quot;DE OUTRAS&quot;</span>
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800/80 flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+              <Check className="w-4 h-4 stroke-[3]" />
+            </div>
+            <div>
+              <span className="text-xs font-bold text-white block">Responder</span>
+              <span className="text-[10px] text-slate-400 block">DMs &amp; Leads no Zap</span>
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800/80 flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+              <Check className="w-4 h-4 stroke-[3]" />
+            </div>
+            <div>
+              <span className="text-xs font-bold text-white block">Planejar</span>
+              <span className="text-[10px] text-slate-400 block">Grade de 7 Dias</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Rodapé do Piloto Automático */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-800/60">
+          <div className="text-xs text-slate-400 flex items-center gap-2">
+            <Clock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span>
+              Rotina diária: cria às <strong className="text-white">{formData.whatsapp_delivery_time || '23:00'}</strong> e programa para às <strong className="text-white">{formData.preferred_post_time || '05:30'}</strong>.
             </span>
           </div>
-          <h3 className="text-base sm:text-lg font-bold text-white">
-            O robô acorda todo dia de manhã, cria seu post e entrega pronto no seu WhatsApp
-          </h3>
-          <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
-            Você não precisa ficar digitando prompts nem abrindo o painel toda hora. O post do dia chega mastigado no seu WhatsApp com arte de agência e legenda com CTA. Basta responder &quot;1&quot; no Zap para aprovar!
-          </p>
-        </div>
 
-        <button
-          onClick={handleDispatchWhatsApp}
-          disabled={dispatchingWhatsApp}
-          className="px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-extrabold text-xs sm:text-sm shadow-lg shadow-emerald-500/20 transition flex items-center justify-center gap-2 shrink-0 disabled:opacity-50"
-        >
-          {dispatchingWhatsApp ? (
-            <>
-              <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
-              <span>Gerando e Enviando no WhatsApp...</span>
-            </>
-          ) : (
-            <>
-              <MessageSquare className="w-4 h-4" />
-              <span>Disparar Post de Hoje no meu WhatsApp Agora</span>
-            </>
-          )}
-        </button>
+          <button
+            onClick={handleDispatchWhatsApp}
+            disabled={dispatchingWhatsApp}
+            className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-extrabold text-xs shadow-md shadow-emerald-500/20 transition flex items-center justify-center gap-2 shrink-0 disabled:opacity-50"
+          >
+            {dispatchingWhatsApp ? (
+              <>
+                <div className="w-3.5 h-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                <span>Enviando no Zap...</span>
+              </>
+            ) : (
+              <>
+                <MessageSquare className="w-3.5 h-3.5" />
+                <span>Disparar Post de Hoje no meu WhatsApp</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
+
+      {/* Modal das 11 Skills do Agente Autônomo */}
+      {showSkillsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div>
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-amber-400" />
+                  As 11 Skills do Agente Autônomo de Instagram
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Baseado no framework de ponta do repositório jakeschincariol/instagram-agent-skill
+                </p>
+              </div>
+              <button
+                onClick={() => setShowSkillsModal(false)}
+                className="p-1.5 rounded-xl hover:bg-slate-800 text-slate-400 hover:text-white transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {SKILLS_11.map((skill) => (
+                <div
+                  key={skill.number}
+                  className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-1.5 hover:border-slate-700 transition"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-5 h-5 rounded-lg bg-pink-500/20 text-pink-300 border border-pink-500/30 flex items-center justify-center text-[10px] font-bold font-mono">
+                        {skill.number}
+                      </span>
+                      <span className="text-xs font-bold text-white">{skill.name}</span>
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-500">{skill.command}</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">{skill.description}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-3 border-t border-slate-800 flex items-center justify-between">
+              <span className="text-xs text-slate-500">
+                Todas as 11 skills trabalham de forma coordenada pelo ERBots.
+              </span>
+              <button
+                onClick={() => setShowSkillsModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition"
+              >
+                Entendi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Navegação por Abas (Estilo Executivo Painel Master) */}
       <div className="flex border-b border-slate-800 space-x-6 sm:space-x-8 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
@@ -1600,23 +1843,53 @@ export default function InstagramAgentManager() {
               )}
             </div>
 
-            {/* Social Selling: Gerador de Comentários */}
+            {/* Social Selling: Gerador de Comentários em Outros Perfis (DE OUTRAS) */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
-              <div className="flex items-center justify-between">
-                <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                  <MessageSquare className="w-4 h-4 text-sky-400" />
-                  Social Selling: Comentários Magnéticos
-                </h4>
-                <span className="text-[10px] text-slate-400">Atraia tráfego de outros perfis</span>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-400">
+                    <MessageSquare className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                      Comentários de Atração
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-sky-500/15 text-sky-300 border border-sky-500/30">
+                        DE OUTRAS (/ig-comment)
+                      </span>
+                    </h4>
+                    <p className="text-[11px] text-slate-400">
+                      Gera comentários inteligentes de autoridade para você deixar em posts de referências e concorrentes do nicho.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Preview Didático do Funcionamento */}
+              <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800/80 space-y-2 text-xs">
+                <div className="flex items-center justify-between text-[11px] text-slate-400">
+                  <span className="font-semibold text-slate-300">Como funciona a estratégia &quot;DE OUTRAS&quot;:</span>
+                  <span className="text-emerald-400 font-mono text-[10px]">Crescimento Orgânico</span>
+                </div>
+                <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 text-[11px] space-y-1.5">
+                  <div className="text-slate-400">
+                    <strong className="text-slate-200">Post de Referência:</strong> &quot;Minha rotina de criação em 3 passos simples...&quot;
+                  </div>
+                  <div className="text-sky-300 flex items-start gap-1.5 pl-2 border-l-2 border-sky-500">
+                    <span>💬</span>
+                    <span><strong>IA gera:</strong> &quot;Conteúdo cirúrgico! O passo 2 é onde a maioria trava por falta de clareza no processo. Excelente abordagem! 🔥&quot;</span>
+                  </div>
+                </div>
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-300 block mb-1.5">Texto do Post do Concorrente</label>
+                <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                  Texto, Tema ou Link do Post da Outra Conta
+                </label>
                 <textarea
                   rows={2}
                   value={competitorText}
                   onChange={(e) => setCompetitorText(e.target.value)}
-                  placeholder="Cole aqui o conteúdo de um post do nicho para gerar comentários de autoridade..."
+                  placeholder="Cole aqui o texto, gancho ou assunto do post em que deseja comentar para atrair clientes..."
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 transition resize-none"
                 />
               </div>
@@ -1626,13 +1899,26 @@ export default function InstagramAgentManager() {
                 disabled={generatingComments}
                 className="w-full py-2.5 rounded-xl font-bold text-xs bg-slate-800 hover:bg-slate-700 text-white transition flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                <span>{generatingComments ? 'Gerando opções...' : 'Gerar 3 Comentários Magnéticos'}</span>
+                {generatingComments ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Analisando e gerando comentários persuasivos...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Gerar 3 Comentários Estratégicos</span>
+                  </>
+                )}
               </button>
 
               {generatedComments.length > 0 && (
                 <div className="space-y-2 pt-1">
+                  <span className="text-[11px] font-semibold text-slate-400 block">
+                    Escolha um dos comentários para colar no post da outra conta:
+                  </span>
                   {generatedComments.map((com, idx) => (
-                    <div key={idx} className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-start justify-between gap-2 text-xs">
+                    <div key={idx} className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-start justify-between gap-2 text-xs hover:border-slate-700 transition">
                       <p className="text-slate-300 leading-relaxed">&quot;{com}&quot;</p>
                       <button
                         onClick={() => copyToClipboard(com, `com-${idx}`)}
