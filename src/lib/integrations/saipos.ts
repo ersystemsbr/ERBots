@@ -331,20 +331,13 @@ export async function createSaiposOrder(
     const errData = await res.json().catch(() => ({}));
     console.warn('[Saipos createSaiposOrder] Resposta da API:', res.status, errData);
 
-    const errorMessage =
+    let errorMessage =
       errData.errorMessage ||
       errData.message ||
       `Erro ao injetar pedido na Saipos (Código ${errData.errorCode || res.status}).`;
 
-    // Se estiver em ambiente de teste ou simulação
-    if (credentials.environment === 'sandbox' || credentials.environment === 'homolog') {
-      return {
-        success: true,
-        external_order_id: `SIM-${Date.now()}`,
-        display_id: displayId,
-        message: `Pedido autenticado e simulado com sucesso na Saipos! (${errorMessage})`,
-        rawResponse: { simulated: true, payload, saiposResponse: errData },
-      };
+    if (errData.errorCode === 906) {
+      errorMessage = `Saipos retornou Erro 906: "${errData.errorMessage || 'Integração indisponível ou vínculo inválido.'}". Para corrigir: acesse o painel da loja na Saipos (conta.saipos.com > Menu > Canais de Vendas e Integrações > clique na sua integração e marque "Habilitar Integração" e salve).`;
     }
 
     return {

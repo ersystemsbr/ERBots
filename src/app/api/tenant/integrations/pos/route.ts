@@ -140,59 +140,55 @@ export async function POST(req: NextRequest) {
         },
         items: [
           {
-            name: 'Pizza Especial de Calabresa Artesanal',
+            id: '43418185',
+            name: 'Diversos (Item Teste)',
             quantity: 1,
-            unit_price: 59.9,
-            total_price: 59.9,
-            notes: 'Massa fina e crocante, bem assada',
-            subitems: [{ name: 'Borda Recheada de Catupiry', price: 12.0, quantity: 1 }],
-          },
-          {
-            name: 'Refrigerante Guaraná Antarctica 2L',
-            quantity: 1,
-            unit_price: 12.0,
-            total_price: 12.0,
+            unit_price: 25.0,
+            total_price: 25.0,
+            notes: 'Item de teste via ERBots IA',
           },
         ],
         payments: [
           {
             type: 'PIX',
-            value: 83.9,
+            value: 25.0,
             prepaid: true,
           },
         ],
         totals: {
-          items_price: 71.9,
-          delivery_fee: 12.0,
+          items_price: 25.0,
+          delivery_fee: 0.0,
           discount: 0.0,
-          total: 83.9,
+          total: 25.0,
         },
         notes: 'Pedido de teste enviado pelo Painel ERBots para validação de fluxo da cozinha.',
       };
 
       const injectResult = await createSaiposOrder(creds, sampleOrder);
 
-      // Salva no histórico de pedidos se possível
-      const supabase = getServiceSupabase();
-      try {
-        await supabase.from('xerb_pos_orders').insert({
-          tenant_id: tenantId,
-          provider: 'saipos',
-          external_order_id: injectResult.external_order_id,
-          display_id: injectResult.display_id || '#1042',
-          customer_name: sampleOrder.customer.name,
-          customer_phone: sampleOrder.customer.phone,
-          order_type: sampleOrder.order_type,
-          status: 'CONFIRMED',
-          items: sampleOrder.items,
-          total_amount: sampleOrder.totals.total,
-          payment_method: 'PIX',
-          delivery_address: sampleOrder.delivery_address,
-          notes: sampleOrder.notes,
-          raw_payload: sampleOrder,
-          response_payload: injectResult.rawResponse || {},
-        });
-      } catch {}
+      // Salva no histórico de pedidos apenas se o pedido foi realmente aceito pela Saipos
+      if (injectResult.success) {
+        const supabase = getServiceSupabase();
+        try {
+          await supabase.from('xerb_pos_orders').insert({
+            tenant_id: tenantId,
+            provider: 'saipos',
+            external_order_id: injectResult.external_order_id,
+            display_id: injectResult.display_id || '#1042',
+            customer_name: sampleOrder.customer.name,
+            customer_phone: sampleOrder.customer.phone,
+            order_type: sampleOrder.order_type,
+            status: 'CONFIRMED',
+            items: sampleOrder.items,
+            total_amount: sampleOrder.totals.total,
+            payment_method: 'PIX',
+            delivery_address: sampleOrder.delivery_address,
+            notes: sampleOrder.notes,
+            raw_payload: sampleOrder,
+            response_payload: injectResult.rawResponse || {},
+          });
+        } catch {}
+      }
 
       return NextResponse.json({
         success: injectResult.success,
