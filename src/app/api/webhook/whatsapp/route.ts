@@ -16,6 +16,11 @@ import { currentUsagePeriod, formatBRL, getPlan, computeAnnualPricing } from '@/
 import { logSystemEvent } from '@/lib/monitoring';
 import { dispatchOutboundWebhook } from '@/lib/outbound-webhook';
 import { generateDailyPostForTenant } from '@/lib/ai/instagram-cron';
+import {
+  getTenantIntegration,
+  createSaiposOrder,
+  SaiposOrderPayload,
+} from '@/lib/integrations/saipos';
 
 export const maxDuration = 60;
 
@@ -439,6 +444,151 @@ async function handleInstagramPostApproval(
   return null;
 }
 
+async function handleSaiposTestTrigger(
+  db: Db,
+  params: {
+    tenantId: string;
+    instanceName: string;
+    remoteJid: string;
+    text: string;
+    isOwner: boolean;
+    tenantName?: string;
+    conversationId?: string;
+  }
+): Promise<NextResponse | null> {
+  const raw = (params.text || '').trim();
+  const clean = raw.toLowerCase().replace(/^[🎤📄🖼️\s]+/, '').trim();
+
+  const isCommand =
+    clean === '#teste-saipos' ||
+    clean === '#saipos' ||
+    clean === '!saipos' ||
+    clean === '!teste-saipos' ||
+    clean === '#pedidosaipos' ||
+    clean === '#pedido-teste';
+
+  const isNaturalTest =
+    clean.includes('saipos') &&
+    (clean.includes('teste') ||
+      clean.includes('gerar pedido') ||
+      clean.includes('criar pedido') ||
+      clean.includes('disparar pedido') ||
+      clean.includes('emitir pedido') ||
+      clean.includes('ver se está gerando pedido') ||
+      clean.includes('consegue ver se') ||
+      clean.includes('homologar') ||
+      clean.includes('homologação'));
+
+  if (!isCommand && !(params.isOwner && isNaturalTest)) return null;
+
+  try {
+    const saiposConfig = await getTenantIntegration(params.tenantId, 'saipos');
+    if (!saiposConfig.is_active || !saiposConfig.credentials?.id_partner) {
+      const warningMsg =
+        '⚠️ *Integração com a Saipos não configurada ou inativa no ERBots.*\n\nAcesse o painel em *Configurações > Integrações (PDV/ERP)* e confirme se o IdPartner e Código da Loja estão salvos e ativos.';
+      await sendTextMessage(params.instanceName, params.remoteJid, warningMsg);
+      if (params.conversationId) {
+        await insertMessage(db, {
+          conversation_id: params.conversationId,
+          tenant_id: params.tenantId,
+          sender: 'ai',
+          content: warningMsg,
+        });
+      }
+      return NextResponse.json({ success: true, action: 'saipos_not_configured' });
+    }
+
+    const sampleOrder: SaiposOrderPayload = {
+      order_type: 'DELIVERY',
+      customer: {
+        name: params.tenantName ? `${params.tenantName} (Teste Zap)` : 'Eric (Teste WhatsApp)',
+        phone: '5511999999999',
+      },
+      delivery_address: {
+        street: 'Av. Paulista',
+        number: '1000',
+        complement: 'Apto 42',
+        neighborhood: 'Bela Vista',
+        city: 'São Paulo',
+        state: 'SP',
+        postal_code: '01310-100',
+        reference: 'Em frente ao metrô',
+      },
+      items: [
+        {
+          id: '43418185',
+          name: 'Diversos (Item Teste)',
+          quantity: 1,
+          unit_price: 25.0,
+          total_price: 25.0,
+          notes: 'Disparado via WhatsApp ERBots',
+        },
+      ],
+      payments: [
+        {
+          type: 'PIX',
+          value: 25.0,
+          prepaid: true,
+        },
+      ],
+      totals: {
+        items_price: 25.0,
+        delivery_fee: 0.0,
+        discount: 0.0,
+        total: 25.0,
+      },
+      notes: 'Pedido de teste enviado direto pelo WhatsApp para homologação da cozinha.',
+    };
+
+    const injectResult = await createSaiposOrder(saiposConfig.credentials, sampleOrder);
+
+    let replyMsg = '';
+    if (injectResult.success) {
+      const displayId = injectResult.display_id || (injectResult.external_order_id ? `#${injectResult.external_order_id}` : 'OK');
+      replyMsg =
+        `🛵 *Pedido de Teste Saipos Gerado com Sucesso!* 🎉\n\n` +
+        `📦 *Venda na Saipos:* ${displayId}\n` +
+        `🍔 *Item:* 1x Diversos (Item Teste) - R$ 25,00\n` +
+        `📍 *Entrega:* Av. Paulista, 1000 - Bela Vista, SP\n` +
+        `💳 *Pagamento:* Pix na Entrega (Confirmado)\n\n` +
+        `✅ O pedido já caiu no Delivery / KDS da sua loja na Saipos!\n` +
+        `Abra *conta.saipos.com* e clique no ícone da motinha (Delivery) para vê-lo na fila de preparo. 👨‍🍳🔥`;
+    } else {
+      replyMsg = `⚠️ *Tentativa de emissão na Saipos retornou:*\n\n${injectResult.message}`;
+    }
+
+    await sendTextMessage(params.instanceName, params.remoteJid, replyMsg);
+
+    if (params.conversationId) {
+      await insertMessage(db, {
+        conversation_id: params.conversationId,
+        tenant_id: params.tenantId,
+        sender: 'ai',
+        content: replyMsg,
+      });
+      await db
+        .from('xerb_conversations')
+        .update({
+          handling_status: 'AI',
+          last_message: replyMsg,
+          last_message_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', params.conversationId);
+    }
+
+    return NextResponse.json({
+      success: injectResult.success,
+      action: injectResult.success ? 'saipos_test_order_injected' : 'saipos_test_order_failed',
+    });
+  } catch (err: any) {
+    console.error('[handleSaiposTestTrigger] Erro:', err);
+    const errorMsg = `❌ *Falha técnica ao tentar emitir pedido na Saipos:* ${err?.message || 'erro desconhecido'}`;
+    await sendTextMessage(params.instanceName, params.remoteJid, errorMsg);
+    return NextResponse.json({ success: true, action: 'saipos_test_order_error' });
+  }
+}
+
 async function handleOwnerMessage(
   db: Db,
   params: { tenant: any; tenantId: string; remoteJid: string; cleanPhone: string; waId?: string | null; content: Content; instanceName?: string }
@@ -454,6 +604,16 @@ async function handleOwnerMessage(
       text: content.text,
     });
     if (approvalRes) return approvalRes;
+
+    const saiposRes = await handleSaiposTestTrigger(db, {
+      tenantId,
+      instanceName,
+      remoteJid,
+      text: content.text,
+      isOwner: true,
+      tenantName: tenant.name,
+    });
+    if (saiposRes) return saiposRes;
   }
 
   // Mensagens para o próprio número do dono / alerta (ex.: avisos de transbordo) não são conversas de cliente
@@ -802,6 +962,16 @@ export async function POST(req: NextRequest) {
         text: content.text,
       });
       if (approvalRes) return approvalRes;
+
+      const saiposRes = await handleSaiposTestTrigger(supabase, {
+        tenantId,
+        instanceName,
+        remoteJid,
+        text: content.text,
+        isOwner: true,
+        tenantName: tenant.name,
+      });
+      if (saiposRes) return saiposRes;
     }
 
     // 3.2 Idempotência: a Evolution pode reenviar o mesmo webhook
@@ -986,6 +1156,18 @@ export async function POST(req: NextRequest) {
       direction: 'in',
       sender: 'user',
     });
+
+    // 6.1 Intercepta comando ou pedido de teste da Saipos direto no WhatsApp (mesmo em áudio ou se a conversa estiver em modo humano)
+    const saiposTestRes = await handleSaiposTestTrigger(supabase, {
+      tenantId,
+      instanceName,
+      remoteJid,
+      text: userText,
+      isOwner: Boolean(isOwnerSender),
+      tenantName: tenant.name,
+      conversationId: conversation.id,
+    });
+    if (saiposTestRes) return saiposTestRes;
 
     // 7. Conversa com atendente humano: a IA NÃO responde (até o dono devolver ou o prazo vencer)
     if (conversation.handling_status === 'HUMAN') {
