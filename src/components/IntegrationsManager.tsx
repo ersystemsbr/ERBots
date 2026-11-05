@@ -47,9 +47,11 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
 
   // Formulário Saipos
   const [saiposForm, setSaiposForm] = useState({
+    id_partner: '',
+    cod_store: '',
     token: '',
     store_id: '',
-    environment: 'production' as 'production' | 'sandbox',
+    environment: 'production' as 'production' | 'sandbox' | 'homolog',
     is_active: false,
     auto_inject_orders: true,
     notify_customer_whatsapp: true,
@@ -76,9 +78,13 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
         const saiposSys = (data.systems || []).find((s: any) => s.id === 'saipos');
         if (saiposSys?.config) {
           const cfg = saiposSys.config;
+          const idPartner = cfg.credentials?.id_partner || cfg.credentials?.token || '';
+          const codStore = cfg.credentials?.cod_store || cfg.credentials?.store_id || '';
           setSaiposForm({
-            token: cfg.credentials?.token || '',
-            store_id: cfg.credentials?.store_id || '',
+            id_partner: idPartner,
+            cod_store: codStore,
+            token: idPartner,
+            store_id: codStore,
             environment: cfg.environment || 'production',
             is_active: Boolean(cfg.is_active),
             auto_inject_orders: cfg.settings?.auto_inject_orders !== false,
@@ -106,6 +112,20 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
     setTimeout(() => setCopiedKey(null), 2500);
   };
 
+  const handleFillTestData = () => {
+    setSaiposForm((prev) => ({
+      ...prev,
+      id_partner: '33f12a976e2a7a100b37fe7d0d102257',
+      cod_store: '99018',
+      environment: 'homolog',
+      is_active: true,
+    }));
+    setFeedbackMsg({
+      type: 'success',
+      text: 'Dados da Loja de Teste (Sandbox) preenchidos! Clique em Testar Conexão ou Salvar.',
+    });
+  };
+
   const handleSaveSaipos = async () => {
     try {
       setSavingSettings(true);
@@ -120,8 +140,10 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
           is_active: saiposForm.is_active,
           environment: saiposForm.environment,
           credentials: {
-            token: saiposForm.token,
-            store_id: saiposForm.store_id,
+            id_partner: saiposForm.id_partner,
+            cod_store: saiposForm.cod_store,
+            token: saiposForm.id_partner,
+            store_id: saiposForm.cod_store,
           },
           settings: {
             auto_inject_orders: saiposForm.auto_inject_orders,
@@ -152,8 +174,8 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
   };
 
   const handleTestConnection = async () => {
-    if (!saiposForm.token.trim()) {
-      setFeedbackMsg({ type: 'error', text: 'Informe o Token da Saipos antes de testar.' });
+    if (!saiposForm.id_partner.trim()) {
+      setFeedbackMsg({ type: 'error', text: 'Informe o IdPartner da loja na Saipos antes de testar.' });
       return;
     }
     try {
@@ -167,8 +189,10 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
           provider: 'saipos',
           action: 'test_connection',
           credentials: {
-            token: saiposForm.token,
-            store_id: saiposForm.store_id,
+            id_partner: saiposForm.id_partner,
+            cod_store: saiposForm.cod_store,
+            token: saiposForm.id_partner,
+            store_id: saiposForm.cod_store,
           },
           environment: saiposForm.environment,
         }),
@@ -183,7 +207,7 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
       } else {
         setFeedbackMsg({
           type: 'error',
-          text: data.message || data.error || 'Não foi possível validar o token da Saipos.',
+          text: data.message || data.error || 'Não foi possível validar o IdPartner junto à Saipos.',
         });
       }
     } catch {
@@ -205,8 +229,10 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
           provider: 'saipos',
           action: 'simulate_order',
           credentials: {
-            token: saiposForm.token,
-            store_id: saiposForm.store_id,
+            id_partner: saiposForm.id_partner,
+            cod_store: saiposForm.cod_store,
+            token: saiposForm.id_partner,
+            store_id: saiposForm.cod_store,
           },
           environment: saiposForm.environment,
         }),
@@ -216,13 +242,13 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
       if (res.ok && data.success) {
         setFeedbackMsg({
           type: 'success',
-          text: `Pedido #${data.displayId || '1042'} injetado com sucesso no fluxo da Saipos!`,
+          text: `Pedido #${data.displayId || '1042'} enviado para o fluxo da Saipos!`,
         });
         await loadData();
       } else {
         setFeedbackMsg({
           type: 'error',
-          text: data.message || data.error || 'Erro ao simular envio de pedido.',
+          text: data.message || data.error || 'Erro ao simular envio de pedido na Saipos.',
         });
       }
     } catch {
@@ -359,7 +385,7 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
                   <h3 className="text-lg font-bold text-white flex items-center gap-2">
                     Saipos Food Delivery &amp; PDV
                     <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-orange-500/15 text-orange-300 border border-orange-500/30">
-                      API v1 Integrador
+                      API Oficial v2.5
                     </span>
                   </h3>
                   <p className="text-xs text-slate-400">
@@ -386,40 +412,94 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
               </button>
             </div>
 
+            {/* Guia de Ativação do Restaurante */}
+            <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-slate-950 to-slate-900 border border-slate-800 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <span className="text-xs font-bold text-white flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  Como ativar o ERBots na sua conta Saipos:
+                </span>
+                <button
+                  type="button"
+                  onClick={handleFillTestData}
+                  className="text-[11px] text-amber-400 hover:text-amber-300 font-semibold underline underline-offset-2 flex items-center gap-1 w-fit"
+                >
+                  <Zap className="w-3 h-3 text-amber-400" />
+                  Preencher dados da Loja de Teste (Sandbox)
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[11px] text-slate-300">
+                <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800/80 space-y-1">
+                  <span className="font-bold text-emerald-400 block">1. Acesse o Painel Saipos</span>
+                  <p className="text-slate-400 leading-relaxed">
+                    Entre em <strong className="text-slate-300">conta.saipos.com</strong> e abra o <strong>Menu → Canais de Vendas e Integrações</strong>.
+                  </p>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800/80 space-y-1">
+                  <span className="font-bold text-emerald-400 block">2. Habilite a Integração</span>
+                  <p className="text-slate-400 leading-relaxed">
+                    Busque por <strong>ERBots</strong> (ou canal externo), clique em <strong>Configurar</strong>, marque <em>Confirmar pedidos automaticamente</em> e salve.
+                  </p>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800/80 space-y-1">
+                  <span className="font-bold text-emerald-400 block">3. Cole o IdPartner e Loja</span>
+                  <p className="text-slate-400 leading-relaxed">
+                    Copie o <strong>IdPartner</strong> gerado e cole abaixo junto com o <strong>ID da sua Loja</strong>. A chave Secret da ER Systems é validada automaticamente.
+                  </p>
+                </div>
+              </div>
+            </div>
+
             {/* Credenciais e Conexão */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div className="space-y-4">
                 <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                  Credenciais de Acesso à Saipos
+                  Identificação da sua Loja na Saipos
                 </h4>
 
                 <div>
                   <label className="text-xs text-slate-400 block mb-1.5 font-medium">
-                    Token de Integração da Saipos <span className="text-rose-400">*</span>
+                    IdPartner da Loja na Saipos <span className="text-rose-400">*</span>
                   </label>
                   <input
-                    type="password"
-                    value={saiposForm.token}
-                    onChange={(e) => setSaiposForm((prev) => ({ ...prev, token: e.target.value }))}
-                    placeholder="Cole seu token gerado no painel da Saipos (ex: eyJhbGciOi...)"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500 transition"
+                    type="text"
+                    value={saiposForm.id_partner}
+                    onChange={(e) =>
+                      setSaiposForm((prev) => ({
+                        ...prev,
+                        id_partner: e.target.value,
+                        token: e.target.value,
+                      }))
+                    }
+                    placeholder="Ex: 33f12a976e2a7a100b37fe7d0d102257"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono transition"
                   />
                   <span className="text-[11px] text-slate-500 mt-1 block">
-                    No painel da Saipos, acesse: <strong className="text-slate-400">Configurações → Integrações → ERBots / Open Delivery</strong> para gerar o token.
+                    Código exclusivo gerado na sua loja Saipos ao salvar a integração. O Secret da plataforma é autenticado de forma segura pelo servidor.
                   </span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs text-slate-400 block mb-1.5 font-medium">ID da Loja / Filial</label>
+                    <label className="text-xs text-slate-400 block mb-1.5 font-medium">
+                      Código da Loja (cod_store) <span className="text-rose-400">*</span>
+                    </label>
                     <input
                       type="text"
-                      value={saiposForm.store_id}
-                      onChange={(e) => setSaiposForm((prev) => ({ ...prev, store_id: e.target.value }))}
-                      placeholder="Ex: 1042"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500 transition"
+                      value={saiposForm.cod_store}
+                      onChange={(e) =>
+                        setSaiposForm((prev) => ({
+                          ...prev,
+                          cod_store: e.target.value,
+                          store_id: e.target.value,
+                        }))
+                      }
+                      placeholder="Ex: 99018"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono transition"
                     />
+                    <span className="text-[10px] text-slate-500 mt-0.5 block">ID numérico da loja na Saipos</span>
                   </div>
 
                   <div>
@@ -431,9 +511,10 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
                       }
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500 transition"
                     >
-                      <option value="production">Produção (api.saipos.com)</option>
-                      <option value="sandbox">Sandbox / Testes</option>
+                      <option value="production">Produção Oficial</option>
+                      <option value="homolog">Homologação (Loja de Teste)</option>
                     </select>
+                    <span className="text-[10px] text-slate-500 mt-0.5 block">order-api.saipos.com</span>
                   </div>
                 </div>
               </div>

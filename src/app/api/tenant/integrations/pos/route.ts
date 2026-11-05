@@ -96,9 +96,13 @@ export async function POST(req: NextRequest) {
     const tenantId = guard.tenant.id;
 
     if (action === 'test_connection') {
+      const idPartner = (credentials?.id_partner || credentials?.token || '').trim();
+      const codStore = (credentials?.cod_store || credentials?.store_id || '').trim();
       const testCreds: SaiposCredentials = {
-        token: credentials?.token || '',
-        store_id: credentials?.store_id || '',
+        id_partner: idPartner,
+        cod_store: codStore,
+        token: idPartner,
+        store_id: codStore,
         environment: environment || 'production',
       };
       const result = await testSaiposConnection(testCreds);
@@ -107,9 +111,16 @@ export async function POST(req: NextRequest) {
 
     if (action === 'simulate_order') {
       const saiposConfig = await getTenantIntegration(tenantId, 'saipos');
-      const creds: SaiposCredentials = credentials?.token
-        ? credentials
-        : saiposConfig.credentials;
+      const idPartner = (credentials?.id_partner || credentials?.token || saiposConfig.credentials.id_partner || saiposConfig.credentials.token || '').trim();
+      const codStore = (credentials?.cod_store || credentials?.store_id || saiposConfig.credentials.cod_store || saiposConfig.credentials.store_id || '99018').trim();
+
+      const creds: SaiposCredentials = {
+        id_partner: idPartner,
+        cod_store: codStore,
+        token: idPartner,
+        store_id: codStore,
+        environment: environment || saiposConfig.environment,
+      };
 
       const sampleOrder = {
         order_type: 'DELIVERY' as const,
@@ -192,12 +203,17 @@ export async function POST(req: NextRequest) {
     }
 
     // Ação Padrão: Salvar configurações
+    const idPartner = (credentials?.id_partner || credentials?.token || '').trim();
+    const codStore = (credentials?.cod_store || credentials?.store_id || '').trim();
+
     const saved = await saveTenantIntegration(tenantId, provider, {
       is_active: Boolean(is_active),
-      environment: environment === 'sandbox' ? 'sandbox' : 'production',
+      environment: environment === 'sandbox' || environment === 'homolog' ? environment : 'production',
       credentials: {
-        token: (credentials?.token || '').trim(),
-        store_id: (credentials?.store_id || '').trim(),
+        id_partner: idPartner,
+        cod_store: codStore,
+        token: idPartner,
+        store_id: codStore,
       },
       settings: {
         auto_inject_orders: settings?.auto_inject_orders !== false,

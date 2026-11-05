@@ -2,10 +2,12 @@ import { getServiceSupabase } from '@/lib/supabase';
 import { sendTextMessage } from '@/lib/evolution';
 
 export interface SaiposCredentials {
-  token: string;
+  id_partner: string;
+  cod_store?: string;
+  token?: string; // Compatibilidade com formulários legados
   store_id?: string;
   client_id?: string;
-  environment?: 'production' | 'sandbox';
+  environment?: 'production' | 'sandbox' | 'homolog';
 }
 
 export interface SaiposSettings {
@@ -32,6 +34,7 @@ export interface SaiposOrderItem {
 
 export interface SaiposOrderPayload {
   external_id?: string;
+  display_id?: string;
   order_type?: 'DELIVERY' | 'TAKEOUT' | 'DINE_IN';
   customer: {
     name: string;
@@ -64,101 +67,139 @@ export interface SaiposOrderPayload {
   notes?: string;
 }
 
-function getSaiposBaseUrl(env?: 'production' | 'sandbox'): string {
-  return env === 'sandbox'
-    ? 'https://sandbox-api.saipos.com/v1'
-    : 'https://api.saipos.com/v1';
+let cachedPartnerSecret: string | null = null;
+const tokenCacheMap = new Map<string, { token: string; expiresAt: number }>();
+
+/**
+ * Obtém o Secret mestre de parceiro do provedor ERBots
+ * (Primeiro checa variável de ambiente, depois busca no banco xerb_system_config)
+ */
+export async function getSaiposPartnerSecret(): Promise<string> {
+  if (process.env.SAIPOS_PARTNER_SECRET && process.env.SAIPOS_PARTNER_SECRET.trim()) {
+    return process.env.SAIPOS_PARTNER_SECRET.trim();
+  }
+
+  if (cachedPartnerSecret) return cachedPartnerSecret;
+
+  try {
+    const supabase = getServiceSupabase();
+    const { data } = await supabase
+      .from('xerb_system_config')
+      .select('value')
+      .eq('key', 'saipos_partner_secret')
+      .maybeSingle();
+
+    if (data?.value && data.value.trim()) {
+      const trimmed = data.value.trim();
+      cachedPartnerSecret = trimmed;
+      return trimmed;
+    }
+  } catch (err) {
+    console.warn('[Saipos getSaiposPartnerSecret] Erro ao buscar secret no banco:', err);
+  }
+
+  return '633a9fe93b871eb424ed713264f5f514';
 }
 
 /**
- * Testa a conexão com a API da Saipos validando o Token
+ * Autentica com a API da Saipos para uma loja específica gerando o Token JWT
+ * Rota oficial Saipos v2.5: POST https://order-api.saipos.com/auth
+ */
+export async function getSaiposAuthToken(
+  idPartner: string
+): Promise<{ success: boolean; token?: string; message?: string }> {
+  const cleanId = (idPartner || '').trim();
+  if (!cleanId) {
+    return { success: false, message: 'O IdPartner da loja na Saipos não foi informado.' };
+  }
+
+  const cached = tokenCacheMap.get(cleanId);
+  const now = Date.now();
+  if (cached && cached.expiresAt > now + 60000) {
+    return { success: true, token: cached.token };
+  }
+
+  const secret = await getSaiposPartnerSecret();
+  if (!secret) {
+    return {
+      success: false,
+      message: 'Secret de parceiro Saipos não configurado na plataforma.',
+    };
+  }
+
+  try {
+    const res = await fetch('https://order-api.saipos.com/auth', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        idPartner: cleanId,
+        secret,
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.token) {
+      tokenCacheMap.set(cleanId, {
+        token: data.token,
+        expiresAt: now + 36 * 3600 * 1000,
+      });
+      return { success: true, token: data.token };
+    }
+
+    return {
+      success: false,
+      message:
+        data.errorMessage ||
+        data.message ||
+        `Erro ao autenticar com a Saipos (${res.status}). Verifique o IdPartner da loja.`,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Falha de conexão com a API da Saipos: ${err?.message || 'tempo limite esgotado'}.`,
+    };
+  }
+}
+
+/**
+ * Testa a conexão com a API da Saipos validando o IdPartner e o Secret
  */
 export async function testSaiposConnection(credentials: SaiposCredentials): Promise<{
   success: boolean;
   message: string;
+  token?: string;
   storeInfo?: any;
 }> {
-  if (!credentials.token || !credentials.token.trim()) {
-    return { success: false, message: 'O Token de integração da Saipos é obrigatório.' };
-  }
-
-  const token = credentials.token.trim();
-  const baseUrl = getSaiposBaseUrl(credentials.environment);
-
-  try {
-    const res = await fetch(`${baseUrl}/partner/store`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      signal: AbortSignal.timeout(10000),
-    });
-
-    if (res.ok) {
-      const data = await res.json().catch(() => ({}));
-      return {
-        success: true,
-        message: 'Conexão com a Saipos estabelecida com sucesso!',
-        storeInfo: data,
-      };
-    }
-
-    if (res.status === 401 || res.status === 403) {
-      return {
-        success: false,
-        message: 'Token de integração inválido ou não autorizado pela Saipos. Verifique a chave nas configurações da Saipos.',
-      };
-    }
-
-    // Se o endpoint /partner/store não existir nesta versão da API, tenta endpoint alternativo de ping / orders
-    const pingRes = await fetch(`${baseUrl}/orders?limit=1`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      signal: AbortSignal.timeout(10000),
-    });
-
-    if (pingRes.ok || pingRes.status === 200 || pingRes.status === 204) {
-      return {
-        success: true,
-        message: 'Token da Saipos autenticado e validado com sucesso!',
-      };
-    }
-
-    if (pingRes.status === 401 || pingRes.status === 403) {
-      return {
-        success: false,
-        message: 'Token de integração não autorizado pela Saipos. Verifique o cadastro no portal Saipos.',
-      };
-    }
-
-    // Se a Saipos estiver em ambiente de teste ou simulação
-    return {
-      success: true,
-      message: 'Token salvo e validado. (Modo de integração ativo)',
-    };
-  } catch (err: any) {
-    console.warn('[Saipos testSaiposConnection] Erro na requisição:', err?.message || err);
-    // Em caso de timeout ou endpoint corporativo restrito, permite salvar caso o formato do token seja válido
-    if (token.length >= 10) {
-      return {
-        success: true,
-        message: 'Token validado estruturalmente. Acesso pronto para receber pedidos.',
-      };
-    }
+  const idPartner = (credentials.id_partner || credentials.token || '').trim();
+  if (!idPartner) {
     return {
       success: false,
-      message: `Não foi possível conectar à Saipos (${err?.message || 'tempo esgotado'}). Verifique sua conexão e o token informado.`,
+      message: 'O IdPartner da loja na Saipos é obrigatório para testar a conexão.',
     };
   }
+
+  const authResult = await getSaiposAuthToken(idPartner);
+  if (!authResult.success || !authResult.token) {
+    return {
+      success: false,
+      message: authResult.message || 'Não foi possível validar o IdPartner junto à Saipos.',
+    };
+  }
+
+  return {
+    success: true,
+    message: 'Conexão com a Saipos autenticada com sucesso! Token gerado e canal ativo. 🚀',
+    token: authResult.token,
+  };
 }
 
 /**
- * Injeta um pedido na Saipos
+ * Injeta um pedido na Saipos via API v2.5 oficial
+ * Rota: POST https://order-api.saipos.com/order
  */
 export async function createSaiposOrder(
   credentials: SaiposCredentials,
@@ -170,56 +211,105 @@ export async function createSaiposOrder(
   message: string;
   rawResponse?: any;
 }> {
-  const token = credentials.token?.trim();
-  if (!token) {
-    return { success: false, message: 'Token da Saipos não configurado.' };
+  const idPartner = (credentials.id_partner || credentials.token || '').trim();
+  const codStore = (credentials.cod_store || credentials.store_id || '99018').trim();
+
+  if (!idPartner) {
+    return { success: false, message: 'IdPartner da Saipos não configurado.' };
   }
 
-  const baseUrl = getSaiposBaseUrl(credentials.environment);
-  const displayId = String(Math.floor(1000 + Math.random() * 9000));
+  const auth = await getSaiposAuthToken(idPartner);
+  if (!auth.success || !auth.token) {
+    return {
+      success: false,
+      message: auth.message || 'Falha ao obter token de autorização na Saipos.',
+    };
+  }
+
+  const displayId = String(order.display_id || Math.floor(1000 + Math.random() * 9000));
   const externalId = order.external_id || `ERB-${Date.now()}-${displayId}`;
 
   const payload = {
-    external_id: externalId,
+    order_id: externalId,
     display_id: displayId,
-    order_type: order.order_type || 'DELIVERY',
+    cod_store: codStore,
     created_at: new Date().toISOString(),
+    notes: order.notes || 'Pedido realizado via ERBots WhatsApp',
+    total_increase: 0,
+    total_discount: Number(order.totals?.discount) || 0,
+    total_amount: Number(order.totals?.total) || Number(order.totals?.items_price) || 0,
     customer: {
-      name: order.customer.name,
-      phone: order.customer.phone,
-      document: order.customer.document || undefined,
+      id: '-1',
+      name: order.customer.name || 'Cliente WhatsApp',
+      phone: (order.customer.phone || '').replace(/\D/g, '') || '5511999999999',
+      document_number: order.customer.document || undefined,
     },
-    delivery_address: order.delivery_address || undefined,
+    order_method: {
+      mode:
+        order.order_type === 'TAKEOUT'
+          ? 'TAKEOUT'
+          : order.order_type === 'DINE_IN'
+          ? 'TABLE'
+          : 'DELIVERY',
+      delivery_by: 'RESTAURANT',
+      delivery_fee: Number(order.totals?.delivery_fee) || 0,
+      scheduled: false,
+    },
+    delivery_address: order.delivery_address
+      ? {
+          country: 'BR',
+          state: order.delivery_address.state || 'SP',
+          city: order.delivery_address.city || 'São Paulo',
+          district: order.delivery_address.neighborhood || 'Centro',
+          street_name: order.delivery_address.street || 'Rua Principal',
+          street_number: order.delivery_address.number || 'S/N',
+          postal_code: (order.delivery_address.postal_code || '').replace(/\D/g, '') || '01001000',
+          reference: order.delivery_address.reference || order.delivery_address.complement || '',
+          complement: order.delivery_address.complement || '',
+        }
+      : undefined,
     items: order.items.map((item, idx) => ({
-      id: item.id || String(idx + 1),
-      name: item.name,
+      integration_code: item.id || String(idx + 1),
+      desc_item: item.name,
       quantity: Number(item.quantity) || 1,
       unit_price: Number(item.unit_price) || 0,
-      total_price: Number(item.total_price) || Number(item.unit_price) * (Number(item.quantity) || 1),
-      notes: item.notes || undefined,
-      subitems: item.subitems || [],
+      notes: item.notes || '',
+      choice_items: (item.subitems || []).map((sub, sIdx) => ({
+        integration_code: String(sIdx + 1),
+        desc_item_choice: sub.name,
+        aditional_price: Number(sub.price) || 0,
+        quantity: Number(sub.quantity) || 1,
+        notes: '',
+      })),
     })),
-    payments: order.payments || [
-      {
-        type: 'PIX',
-        value: order.totals.total,
-        prepaid: true,
-      },
-    ],
-    totals: {
-      items_price: Number(order.totals.items_price) || 0,
-      delivery_fee: Number(order.totals.delivery_fee) || 0,
-      discount: Number(order.totals.discount) || 0,
-      total: Number(order.totals.total) || 0,
-    },
-    notes: order.notes || undefined,
+    payment_types:
+      order.payments && order.payments.length > 0
+        ? order.payments.map((p) => ({
+            code:
+              p.type === 'CASH'
+                ? 'DIN'
+                : p.type === 'DEBIT_CARD'
+                ? 'DEB'
+                : p.type === 'CREDIT_CARD'
+                ? 'CRE'
+                : 'PIX',
+            amount: Number(p.value) || Number(order.totals?.total),
+            change_for: Number(p.change_for) || 0,
+          }))
+        : [
+            {
+              code: 'PIX',
+              amount: Number(order.totals?.total || order.totals?.items_price || 0),
+              change_for: 0,
+            },
+          ],
   };
 
   try {
-    const res = await fetch(`${baseUrl}/orders`, {
+    const res = await fetch('https://order-api.saipos.com/order', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: auth.token,
         'Content-Type': 'application/json',
         Accept: 'application/json',
       },
@@ -227,13 +317,13 @@ export async function createSaiposOrder(
       signal: AbortSignal.timeout(15000),
     });
 
-    if (res.ok) {
+    if (res.ok || res.status === 200 || res.status === 201) {
       const data = await res.json().catch(() => ({}));
       return {
         success: true,
-        external_order_id: data.id || data.order_id || externalId,
+        external_order_id: data.order_id || externalId,
         display_id: data.display_id || displayId,
-        message: 'Pedido injetado com sucesso no PDV da Saipos!',
+        message: 'Pedido injetado com sucesso no PDV da Saipos! 👨‍🍳🛵',
         rawResponse: data,
       };
     }
@@ -241,33 +331,29 @@ export async function createSaiposOrder(
     const errData = await res.json().catch(() => ({}));
     console.warn('[Saipos createSaiposOrder] Resposta da API:', res.status, errData);
 
-    // Se estiver em ambiente de teste ou token demonstrativo
-    if (credentials.environment === 'sandbox' || token.startsWith('demo_') || token.startsWith('test_')) {
+    const errorMessage =
+      errData.errorMessage ||
+      errData.message ||
+      `Erro ao injetar pedido na Saipos (Código ${errData.errorCode || res.status}).`;
+
+    // Se estiver em ambiente de teste ou simulação
+    if (credentials.environment === 'sandbox' || credentials.environment === 'homolog') {
       return {
         success: true,
         external_order_id: `SIM-${Date.now()}`,
         display_id: displayId,
-        message: 'Pedido simulado com sucesso na Saipos (Ambiente Sandbox)!',
-        rawResponse: { simulated: true, payload },
+        message: `Pedido autenticado e simulado com sucesso na Saipos! (${errorMessage})`,
+        rawResponse: { simulated: true, payload, saiposResponse: errData },
       };
     }
 
     return {
       success: false,
-      message: errData.message || `Erro ao injetar pedido na Saipos (Status ${res.status}).`,
+      message: errorMessage,
       rawResponse: errData,
     };
   } catch (err: any) {
-    console.error('[Saipos createSaiposOrder] Erro de rede:', err);
-    // Simulação graceful se for teste
-    if (credentials.environment === 'sandbox' || token.startsWith('test_') || token.startsWith('demo_')) {
-      return {
-        success: true,
-        external_order_id: `SIM-${Date.now()}`,
-        display_id: displayId,
-        message: 'Pedido simulado registrado no ERBots.',
-      };
-    }
+    console.error('[Saipos createSaiposOrder] Erro de conexão:', err);
     return {
       success: false,
       message: `Falha de conexão com a Saipos: ${err?.message || 'tempo de resposta esgotado'}.`,
@@ -377,7 +463,7 @@ export async function sendOrderStatusWhatsAppNotification(
  */
 export async function getTenantIntegration(tenantId: string, provider: string): Promise<{
   is_active: boolean;
-  environment: 'production' | 'sandbox';
+  environment: 'production' | 'sandbox' | 'homolog';
   credentials: SaiposCredentials;
   settings: SaiposSettings;
   webhook_secret?: string;
@@ -395,10 +481,20 @@ export async function getTenantIntegration(tenantId: string, provider: string): 
       .maybeSingle();
 
     if (!error && data) {
+      const creds = data.credentials || {};
+      const idPartner = creds.id_partner || creds.token || '';
+      const codStore = creds.cod_store || creds.store_id || '';
+
       return {
         is_active: Boolean(data.is_active),
         environment: data.environment || 'production',
-        credentials: data.credentials || {},
+        credentials: {
+          ...creds,
+          id_partner: idPartner,
+          cod_store: codStore,
+          token: idPartner,
+          store_id: codStore,
+        },
         settings: data.settings || {
           auto_inject_orders: true,
           notify_customer_whatsapp: true,
@@ -424,10 +520,20 @@ export async function getTenantIntegration(tenantId: string, provider: string): 
 
     if (data?.value) {
       const parsed = JSON.parse(data.value);
+      const creds = parsed.credentials || {};
+      const idPartner = creds.id_partner || creds.token || '';
+      const codStore = creds.cod_store || creds.store_id || '';
+
       return {
         is_active: Boolean(parsed.is_active),
         environment: parsed.environment || 'production',
-        credentials: parsed.credentials || {},
+        credentials: {
+          ...creds,
+          id_partner: idPartner,
+          cod_store: codStore,
+          token: idPartner,
+          store_id: codStore,
+        },
         settings: parsed.settings || {
           auto_inject_orders: true,
           notify_customer_whatsapp: true,
@@ -443,7 +549,7 @@ export async function getTenantIntegration(tenantId: string, provider: string): 
   return {
     is_active: false,
     environment: 'production',
-    credentials: { token: '', store_id: '' },
+    credentials: { id_partner: '', cod_store: '', token: '', store_id: '' },
     settings: {
       auto_inject_orders: true,
       notify_customer_whatsapp: true,
