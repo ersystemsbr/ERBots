@@ -12,6 +12,13 @@ import {
 } from '@/lib/integrations/saipos';
 import { getIfoodIntegration, saveIfoodIntegration } from '@/lib/integrations/ifood';
 import { getGoogleBusinessConfig } from '@/lib/integrations/google-business';
+import {
+  getAnotaAiIntegration,
+  saveAnotaAiIntegration,
+  testAnotaAiConnection,
+  syncAnotaAiCatalogToKnowledgeBase,
+  createAnotaAiOrder,
+} from '@/lib/integrations/anota-ai';
 
 export async function GET(req: NextRequest) {
   try {
@@ -22,10 +29,11 @@ export async function GET(req: NextRequest) {
     if (!guard.ok) return guard.response;
 
     const tenantId = guard.tenant.id;
-    const [saiposConfig, ifoodConfig, googleConfig] = await Promise.all([
+    const [saiposConfig, ifoodConfig, googleConfig, anotaConfig] = await Promise.all([
       getTenantIntegration(tenantId, 'saipos'),
       getIfoodIntegration(tenantId),
       getGoogleBusinessConfig(tenantId),
+      getAnotaAiIntegration(tenantId),
     ]);
 
     // Busca pedidos recentes no PDV se a tabela existir
@@ -46,11 +54,13 @@ export async function GET(req: NextRequest) {
       (typeof window !== 'undefined' ? window.location.origin : 'https://www.erbots.com.br');
     const webhookUrl = `${appUrl}/api/webhook/saipos?tenant_id=${tenantId}`;
     const ifoodWebhookUrl = `${appUrl}/api/webhook/ifood?tenant_id=${tenantId}`;
+    const anotaWebhookUrl = `${appUrl}/api/webhook/anota-ai?tenant_id=${tenantId}`;
 
     return NextResponse.json({
       success: true,
       webhookUrl,
       ifoodWebhookUrl,
+      anotaWebhookUrl,
       systems: [
         {
           id: 'saipos',
@@ -60,6 +70,15 @@ export async function GET(req: NextRequest) {
           is_available: true,
           badge: saiposConfig.is_active ? 'Conectado & Ativo' : 'Disponível',
           config: saiposConfig,
+        },
+        {
+          id: 'anota_ai',
+          name: 'Anota AI',
+          tagline: 'Cardápio Digital Inteligente & Atendente Virtual com Injeção de Pedidos',
+          status: anotaConfig.is_active ? 'active' : 'available',
+          is_available: true,
+          badge: anotaConfig.is_active ? 'Conectado & Ativo' : 'Disponível',
+          config: anotaConfig,
         },
         {
           id: 'ifood',
@@ -97,6 +116,84 @@ export async function POST(req: NextRequest) {
     if (!guard.ok) return guard.response;
 
     const tenantId = guard.tenant.id;
+
+    if (provider === 'anota_ai') {
+      if (action === 'test_connection') {
+        const result = await testAnotaAiConnection({
+          api_token: (credentials?.api_token || credentials?.token || '').trim(),
+          merchant_id: (credentials?.merchant_id || credentials?.store_id || '').trim(),
+          environment: environment || 'production',
+        });
+        return NextResponse.json(result);
+      }
+
+      if (action === 'sync_menu') {
+        const syncResult = await syncAnotaAiCatalogToKnowledgeBase(tenantId);
+        return NextResponse.json(syncResult);
+      }
+
+      if (action === 'simulate_order') {
+        const anotaConfig = await getAnotaAiIntegration(tenantId);
+        const token = (credentials?.api_token || credentials?.token || anotaConfig.credentials.api_token || '').trim();
+        const merchantId = (credentials?.merchant_id || credentials?.store_id || anotaConfig.credentials.merchant_id || '').trim();
+
+        const result = await createAnotaAiOrder(
+          {
+            api_token: token,
+            merchant_id: merchantId,
+            environment: environment || anotaConfig.environment,
+          },
+          {
+            order_type: 'DELIVERY',
+            customer: {
+              name: 'Cliente Teste ERBots',
+              phone: guard.tenant.phone || guard.tenant.alert_phone || '5511999999999',
+            },
+            delivery_address: {
+              street: 'Av. Paulista',
+              number: '1000',
+              neighborhood: 'Bela Vista',
+              city: 'São Paulo',
+            },
+            items: [
+              {
+                id: 'teste_1',
+                name: 'Item Teste Anota AI',
+                quantity: 1,
+                unit_price: 25.0,
+                total_price: 25.0,
+              },
+            ],
+            notes: 'Teste de injeção direta via ERBots',
+          }
+        );
+        return NextResponse.json(result);
+      }
+
+      // Salva configurações do Anota AI
+      const saved = await saveAnotaAiIntegration(tenantId, {
+        is_active: Boolean(is_active),
+        environment: environment === 'sandbox' ? 'sandbox' : 'production',
+        credentials: {
+          api_token: (credentials?.api_token || credentials?.token || '').trim(),
+          merchant_id: (credentials?.merchant_id || credentials?.store_id || '').trim(),
+          environment: environment === 'sandbox' ? 'sandbox' : 'production',
+        },
+        settings: {
+          auto_inject_orders: settings?.auto_inject_orders !== false,
+          notify_customer_whatsapp: settings?.notify_customer_whatsapp !== false,
+          default_payment: settings?.default_payment || 'PIX',
+          sync_menu: Boolean(settings?.sync_menu),
+        },
+      });
+
+      return NextResponse.json({
+        success: saved,
+        message: saved
+          ? 'Configurações da integração Anota AI salvas com sucesso!'
+          : 'Erro ao salvar Anota AI.',
+      });
+    }
 
     if (action === 'test_connection') {
       const idPartner = (credentials?.id_partner || credentials?.token || '').trim();

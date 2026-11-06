@@ -23,6 +23,11 @@ import {
   SaiposOrderPayload,
 } from '@/lib/integrations/saipos';
 import {
+  getAnotaAiIntegration,
+  createAnotaAiOrder,
+  fetchAnotaAiCatalog,
+} from '@/lib/integrations/anota-ai';
+import {
   getPendingNpsResponseForPhone,
   updateNpsQueueItem,
   getReengagementSettings,
@@ -931,7 +936,7 @@ export async function POST(req: NextRequest) {
     const { remoteJid, contactPhone: cleanPhone } = parseWhatsAppAddress(key, data);
 
     // Busca dados do tenant, bot_settings, knowledge_base e tabela de planos vigente
-    const [tenantRes, botSettingsRes, kbRes, plansCfg, saiposConfig] = await Promise.all([
+    const [tenantRes, botSettingsRes, kbRes, plansCfg, saiposConfig, anotaConfig] = await Promise.all([
       supabase
         .from('xerb_tenants')
         .select(
@@ -943,6 +948,7 @@ export async function POST(req: NextRequest) {
       supabase.from('xerb_knowledge_base').select('category, title, content').eq('tenant_id', tenantId).eq('is_active', true),
       getPlansConfig(),
       getTenantIntegration(tenantId, 'saipos').catch(() => null),
+      getAnotaAiIntegration(tenantId).catch(() => null),
     ]);
 
     const tenant = tenantRes.data;
@@ -1384,6 +1390,12 @@ export async function POST(req: NextRequest) {
             provider: 'saipos',
             auto_inject_orders: saiposConfig.settings?.auto_inject_orders !== false,
           }
+        : anotaConfig?.is_active
+        ? {
+            is_active: true,
+            provider: 'anota_ai',
+            auto_inject_orders: anotaConfig.settings?.auto_inject_orders !== false,
+          }
         : undefined,
     });
 
@@ -1675,6 +1687,74 @@ export async function POST(req: NextRequest) {
         }
       } catch (orderErr) {
         console.error('[Webhook WhatsApp] Erro ao injetar pedido conversacional na Saipos:', orderErr);
+      }
+    }
+
+    // 11.2 Se a IA fechou um pedido e o Anota AI estiver ativo, injeta no Anota AI
+    if (!orderInjectedSuccess && aiResult.capturedOrder && anotaConfig?.is_active && anotaConfig?.settings?.auto_inject_orders !== false) {
+      try {
+        const orderData = aiResult.capturedOrder;
+        const finalTotal = orderData.items.reduce((s: number, it: any) => s + (Number(it.unit_price || it.total_price) || 0) * (Number(it.quantity) || 1), 0);
+
+        const anotaPayload = {
+          order_type: 'DELIVERY' as const,
+          customer: {
+            name: orderData.customer_name || pushName || conversation.contact_name || 'Cliente WhatsApp',
+            phone: cleanPhone,
+          },
+          delivery_address: {
+            street: orderData.delivery_address?.street || 'Endereço a confirmar',
+            number: String(orderData.delivery_address?.number || 'S/N'),
+            neighborhood: orderData.delivery_address?.neighborhood || 'Bairro',
+            city: orderData.delivery_address?.city || '',
+            complement: orderData.delivery_address?.complement || '',
+            reference: orderData.delivery_address?.reference || '',
+          },
+          items: orderData.items.map((it: any) => ({
+            id: String(it.id || 'item_anota'),
+            name: String(it.name || 'Produto'),
+            quantity: Number(it.quantity) || 1,
+            unit_price: Number(it.unit_price) || 0,
+            total_price: Number(it.total_price) || (Number(it.unit_price) || 0) * (Number(it.quantity) || 1),
+            observations: it.observations || '',
+          })),
+          payments: [
+            {
+              type: orderData.payment_method || 'PIX',
+              amount: finalTotal,
+            },
+          ],
+          notes: orderData.notes || 'Pedido fechado via Inteligência Artificial do ERBots',
+        };
+
+        const injectResult = await createAnotaAiOrder(anotaConfig.credentials, anotaPayload);
+        if (injectResult.success) {
+          orderInjectedSuccess = true;
+          const displayId = injectResult.display_id || (injectResult.external_order_id ? `#${injectResult.external_order_id}` : '');
+
+          const confirmOrderMsg = `👨‍🍳 *Pedido Confirmado e Transmitido para a Cozinha!* ${displayId ? `(Venda ${displayId})` : ''}\n\nJá estamos preparando seu pedido com todo o capricho no Anota AI! Assim que o entregador sair para a entrega, te aviso por aqui em tempo real. Muito obrigado pela preferência! ❤️🛵`;
+
+          await sendTextMessage(instanceName, remoteJid, confirmOrderMsg);
+          await insertMessage(supabase, {
+            conversation_id: conversation.id,
+            tenant_id: tenantId,
+            sender: 'ai',
+            content: confirmOrderMsg,
+          });
+
+          // Notifica o dono no WhatsApp
+          await notifyOwner({
+            instanceName,
+            tenant,
+            customerName: pushName || conversation.contact_name || '',
+            customerPhone: cleanPhone,
+            lastMessage: `🛵 NOVO PEDIDO ANOTA AI: ${displayId}\nTotal: R$ ${finalTotal.toFixed(2)}\nItens: ${orderData.items.map((it: any) => `${it.quantity}x ${it.name}`).join(', ')}`,
+            handoff: false,
+            conversationId: conversation.id,
+          });
+        }
+      } catch (orderErr) {
+        console.error('[Webhook WhatsApp] Erro ao injetar pedido conversacional no Anota AI:', orderErr);
       }
     }
 

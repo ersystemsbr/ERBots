@@ -49,6 +49,7 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
   const [recentOrders, setRecentOrders] = useState<any[]>([]);
   const [webhookUrl, setWebhookUrl] = useState('');
   const [ifoodWebhookUrl, setIfoodWebhookUrl] = useState('');
+  const [anotaWebhookUrl, setAnotaWebhookUrl] = useState('');
   const [selectedSystem, setSelectedSystem] = useState<string>('saipos');
 
   // Formulário Saipos
@@ -58,6 +59,17 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
     token: '',
     store_id: '',
     environment: 'production' as 'production' | 'sandbox' | 'homolog',
+    is_active: false,
+    auto_inject_orders: true,
+    notify_customer_whatsapp: true,
+    default_payment: 'PIX' as 'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD' | 'CASH',
+  });
+
+  // Formulário Anota AI
+  const [anotaForm, setAnotaForm] = useState({
+    api_token: '',
+    merchant_id: '',
+    environment: 'production' as 'production' | 'sandbox',
     is_active: false,
     auto_inject_orders: true,
     notify_customer_whatsapp: true,
@@ -102,6 +114,7 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
         setRecentOrders(data.recentOrders || []);
         setWebhookUrl(data.webhookUrl || '');
         setIfoodWebhookUrl(data.ifoodWebhookUrl || '');
+        setAnotaWebhookUrl(data.anotaWebhookUrl || '');
 
         const saiposSys = (data.systems || []).find((s: any) => s.id === 'saipos');
         if (saiposSys?.config) {
@@ -113,6 +126,20 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
             cod_store: codStore,
             token: idPartner,
             store_id: codStore,
+            environment: cfg.environment || 'production',
+            is_active: Boolean(cfg.is_active),
+            auto_inject_orders: cfg.settings?.auto_inject_orders !== false,
+            notify_customer_whatsapp: cfg.settings?.notify_customer_whatsapp !== false,
+            default_payment: cfg.settings?.default_payment || 'PIX',
+          });
+        }
+
+        const anotaSys = (data.systems || []).find((s: any) => s.id === 'anota_ai');
+        if (anotaSys?.config) {
+          const cfg = anotaSys.config;
+          setAnotaForm({
+            api_token: cfg.credentials?.api_token || '',
+            merchant_id: cfg.credentials?.merchant_id || '',
             environment: cfg.environment || 'production',
             is_active: Boolean(cfg.is_active),
             auto_inject_orders: cfg.settings?.auto_inject_orders !== false,
@@ -338,6 +365,166 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
       }
     } catch {
       setFeedbackMsg({ type: 'error', text: 'Erro ao conectar para sincronizar o cardápio.' });
+    } finally {
+      setSyncingMenu(false);
+    }
+  };
+
+  const handleSaveAnotaAi = async () => {
+    try {
+      setSavingSettings(true);
+      setFeedbackMsg(null);
+      const res = await authFetch('/api/tenant/integrations/pos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          provider: 'anota_ai',
+          is_active: anotaForm.is_active,
+          environment: anotaForm.environment,
+          credentials: {
+            api_token: anotaForm.api_token,
+            merchant_id: anotaForm.merchant_id,
+          },
+          settings: {
+            auto_inject_orders: anotaForm.auto_inject_orders,
+            notify_customer_whatsapp: anotaForm.notify_customer_whatsapp,
+            default_payment: anotaForm.default_payment,
+            sync_menu: true,
+          },
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setFeedbackMsg({ type: 'success', text: 'Configurações do Anota AI salvas com sucesso!' });
+        loadData();
+      } else {
+        setFeedbackMsg({ type: 'error', text: data.error || 'Erro ao salvar Anota AI.' });
+      }
+    } catch (err: any) {
+      setFeedbackMsg({ type: 'error', text: err?.message || 'Erro ao salvar Anota AI.' });
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const handleTestAnotaAiConnection = async () => {
+    if (!anotaForm.api_token.trim()) {
+      setFeedbackMsg({ type: 'error', text: 'Informe o Token de API do Anota AI antes de testar.' });
+      return;
+    }
+    try {
+      setTestingConnection(true);
+      setFeedbackMsg(null);
+      const res = await authFetch('/api/tenant/integrations/pos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          provider: 'anota_ai',
+          action: 'test_connection',
+          credentials: {
+            api_token: anotaForm.api_token,
+            merchant_id: anotaForm.merchant_id,
+          },
+          environment: anotaForm.environment,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setFeedbackMsg({
+          type: 'success',
+          text: data.message || 'Conexão com o Anota AI validada com sucesso! 🚀',
+        });
+      } else {
+        setFeedbackMsg({
+          type: 'error',
+          text: data.message || data.error || 'Não foi possível autenticar o token junto ao Anota AI.',
+        });
+      }
+    } catch {
+      setFeedbackMsg({ type: 'error', text: 'Falha de rede ao testar conexão com o Anota AI.' });
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
+  const handleSimulateAnotaAiOrder = async () => {
+    if (!anotaForm.api_token.trim()) {
+      setFeedbackMsg({ type: 'error', text: 'Configure o Token de API do Anota AI antes de simular pedido.' });
+      return;
+    }
+    try {
+      setSimulatingOrder(true);
+      setFeedbackMsg(null);
+      const res = await authFetch('/api/tenant/integrations/pos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          provider: 'anota_ai',
+          action: 'simulate_order',
+          credentials: {
+            api_token: anotaForm.api_token,
+            merchant_id: anotaForm.merchant_id,
+          },
+          environment: anotaForm.environment,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setFeedbackMsg({
+          type: 'success',
+          text: `Pedido de teste #${data.displayId || ''} enviado com sucesso ao Anota AI!`,
+        });
+        loadData();
+      } else {
+        setFeedbackMsg({
+          type: 'error',
+          text: data.message || data.error || 'Falha ao injetar pedido de teste no Anota AI.',
+        });
+      }
+    } catch {
+      setFeedbackMsg({ type: 'error', text: 'Erro ao conectar com a API do Anota AI.' });
+    } finally {
+      setSimulatingOrder(false);
+    }
+  };
+
+  const handleSyncAnotaAiMenu = async () => {
+    if (!anotaForm.api_token.trim()) {
+      setFeedbackMsg({ type: 'error', text: 'Informe o Token de API do Anota AI antes de sincronizar o cardápio.' });
+      return;
+    }
+    try {
+      setSyncingMenu(true);
+      setFeedbackMsg(null);
+      const res = await authFetch('/api/tenant/integrations/pos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          provider: 'anota_ai',
+          action: 'sync_menu',
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setFeedbackMsg({
+          type: 'success',
+          text: data.message || 'Cardápio do Anota AI sincronizado com sucesso com a IA!',
+        });
+      } else {
+        setFeedbackMsg({
+          type: 'error',
+          text: data.message || data.error || 'Erro ao sincronizar cardápio do Anota AI.',
+        });
+      }
+    } catch {
+      setFeedbackMsg({ type: 'error', text: 'Erro ao conectar para sincronizar o cardápio do Anota AI.' });
     } finally {
       setSyncingMenu(false);
     }
@@ -917,6 +1104,188 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
         </div>
       )}
 
+      {/* Painel do Sistema: Anota AI */}
+      {selectedSystem === 'anota_ai' && (
+        <div className="space-y-6 animate-in fade-in duration-300">
+          <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 sm:p-7 space-y-6 shadow-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white font-extrabold text-xl shadow-lg shadow-emerald-500/20">
+                  <Utensils className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg font-bold text-white">Anota AI</h3>
+                    <span
+                      className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
+                        anotaForm.is_active
+                          ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                          : 'bg-slate-800 border-slate-700 text-slate-400'
+                      }`}
+                    >
+                      {anotaForm.is_active ? 'Conectado & Ativo' : 'Pendente de Ativação'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Cardápio Digital Inteligente & Atendente Virtual com Injeção de Pedidos.
+                  </p>
+                </div>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={anotaForm.is_active}
+                  onChange={(e) => setAnotaForm({ ...anotaForm, is_active: e.target.checked })}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+              </label>
+            </div>
+
+            <div className="space-y-4">
+              <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                Identificação da sua Loja no Anota AI
+              </h4>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Token de API do Anota AI <span className="text-rose-400">*</span>
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="Cole aqui o Token de API gerado no Anota AI"
+                    value={anotaForm.api_token}
+                    onChange={(e) => setAnotaForm({ ...anotaForm, api_token: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+                  />
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Disponível no painel do Anota AI em Integrações & API.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Merchant ID / Identificador da Loja (Opcional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ex: 64b1... ou nome da sua loja"
+                    value={anotaForm.merchant_id}
+                    onChange={(e) => setAnotaForm({ ...anotaForm, merchant_id: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Ambiente</label>
+                <select
+                  value={anotaForm.environment}
+                  onChange={(e) =>
+                    setAnotaForm({ ...anotaForm, environment: e.target.value as 'production' | 'sandbox' })
+                  }
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="production">Produção (Loja Real Anota AI)</option>
+                  <option value="sandbox">Sandbox (Ambiente de Testes)</option>
+                </select>
+              </div>
+
+              <div className="pt-2 border-t border-slate-800/80 space-y-3">
+                <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-emerald-400" />
+                  Regras de Automação com o WhatsApp
+                </h4>
+
+                <label className="flex items-start gap-3 p-3.5 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition">
+                  <input
+                    type="checkbox"
+                    checked={anotaForm.auto_inject_orders}
+                    onChange={(e) => setAnotaForm({ ...anotaForm, auto_inject_orders: e.target.checked })}
+                    className="mt-0.5 rounded border-slate-700 text-emerald-500 focus:ring-0"
+                  />
+                  <div>
+                    <span className="text-xs font-bold text-white block">
+                      Injeção Automática de Pedidos
+                    </span>
+                    <span className="text-[11px] text-slate-400">
+                      Assim que o cliente confirma o pedido no WhatsApp, o robô dispara o pedido direto para o Anota AI sem intervenção manual.
+                    </span>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-3 p-3.5 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition">
+                  <input
+                    type="checkbox"
+                    checked={anotaForm.notify_customer_whatsapp}
+                    onChange={(e) =>
+                      setAnotaForm({ ...anotaForm, notify_customer_whatsapp: e.target.checked })
+                    }
+                    className="mt-0.5 rounded border-slate-700 text-emerald-500 focus:ring-0"
+                  />
+                  <div>
+                    <span className="text-xs font-bold text-white block">
+                      Avisos de Status Automáticos no WhatsApp do Cliente
+                    </span>
+                    <span className="text-[11px] text-slate-400">
+                      Quando a cozinha aceita o pedido, quando sai para entrega ou quando for entregue, o robô avisa o cliente em tempo real.
+                    </span>
+                  </div>
+                </label>
+              </div>
+
+              {/* Botões de Ação Anota AI */}
+              <div className="pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleTestAnotaAiConnection}
+                    disabled={testingConnection}
+                    className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 transition flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {testingConnection ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />}
+                    <span>Testar Conexão</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSimulateAnotaAiOrder}
+                    disabled={simulatingOrder}
+                    className="px-4 py-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-xs font-bold text-amber-300 transition flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {simulatingOrder ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                    <span>Injetar Pedido de Teste</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSyncAnotaAiMenu}
+                    disabled={syncingMenu}
+                    className="px-4 py-2.5 rounded-xl bg-teal-500/10 hover:bg-teal-500/20 border border-teal-500/30 text-xs font-bold text-teal-300 transition flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {syncingMenu ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                    <span>Sincronizar Cardápio para a IA</span>
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleSaveAnotaAi}
+                  disabled={savingSettings}
+                  className="px-6 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 text-xs font-bold transition flex items-center gap-2 shadow-lg disabled:opacity-50"
+                >
+                  {savingSettings ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                  <span>Salvar Configurações do Anota AI</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Painel do Sistema: iFood / Open Delivery */}
       {selectedSystem === 'ifood' && (
         <div className="space-y-6 animate-in fade-in duration-300">
@@ -1204,7 +1573,7 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
       )}
 
       {/* Outros Sistemas: Fallback genérico */}
-      {selectedSystem !== 'saipos' && selectedSystem !== 'ifood' && selectedSystem !== 'google_business' && (
+      {selectedSystem !== 'saipos' && selectedSystem !== 'anota_ai' && selectedSystem !== 'ifood' && selectedSystem !== 'google_business' && (
         <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-7 text-center space-y-4 shadow-xl">
           <div className="w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 mx-auto flex items-center justify-center text-slate-300">
             <Database className="w-7 h-7 text-emerald-400" />
