@@ -2,7 +2,7 @@ import { getServiceSupabase } from './supabase';
 import { normalizeBrPhone, sendTextMessage } from './evolution';
 
 export interface ReengagementSettings {
-  // NPS Pós-Entrega
+  // NPS Pós-Entrega / Pós-Atendimento
   nps_enabled: boolean;
   nps_delay_minutes: number; // padrão: 40 minutos
   google_maps_url?: string;
@@ -34,15 +34,20 @@ export interface NpsQueueItem {
   responded_at?: string;
 }
 
+// CRÍTICO: Todas as campanhas ativas e NPS são DESATIVADAS por padrão (false)
+// para nunca disparar mensagens indevidas sem o lojista configurar e autorizar previamente.
 const DEFAULT_SETTINGS: ReengagementSettings = {
-  nps_enabled: true,
+  nps_enabled: false,
   nps_delay_minutes: 40,
   google_maps_url: '',
-  weekend_campaign_enabled: true,
+  nps_custom_message: '',
+  weekend_campaign_enabled: false,
   weekend_day: 5, // Sexta-feira
   weekend_time: '18:00',
-  inactive_reengagement_enabled: true,
+  weekend_custom_message: '',
+  inactive_reengagement_enabled: false,
   inactive_threshold_days: 20,
+  inactive_custom_message: '',
 };
 
 /**
@@ -98,7 +103,7 @@ export async function saveReengagementSettings(
 }
 
 /**
- * Agenda a pesquisa de NPS quando um pedido é entregue (Saipos status DELIVERED)
+ * Agenda a pesquisa de NPS quando um pedido é entregue (Saipos/AnotaAI/iFood status DELIVERED)
  */
 export async function scheduleOrderNps(
   tenantId: string,
@@ -110,6 +115,10 @@ export async function scheduleOrderNps(
 ): Promise<boolean> {
   const cleanPhone = normalizeBrPhone(orderInfo.customerPhone);
   if (!cleanPhone) return false;
+
+  // Só agenda se o lojista de fato ativou o NPS nas configurações
+  const settings = await getReengagementSettings(tenantId);
+  if (!settings.nps_enabled) return false;
 
   const supabase = getServiceSupabase();
   try {
@@ -146,7 +155,6 @@ export async function scheduleOrderNps(
       status: 'pending',
     };
 
-    // Mantém apenas os últimos 50 itens na fila
     const updatedQueue = [newItem, ...queue.slice(0, 49)];
 
     await supabase.from('xerb_system_config').upsert(
@@ -226,7 +234,6 @@ export async function getPendingNpsResponseForPhone(
 
   const queue = await getTenantNpsQueue(tenantId);
   const nowMs = Date.now();
-  // Aguarda resposta de NPS nas últimas 24h
   const item = queue.find(
     (q) =>
       q.customer_phone === cleanPhone &&
@@ -236,6 +243,22 @@ export async function getPendingNpsResponseForPhone(
   );
 
   return item || null;
+}
+
+function isRestaurantSegment(segment?: string): boolean {
+  if (!segment) return false;
+  const s = segment.toLowerCase();
+  return (
+    s.includes('restaurante') ||
+    s.includes('aliment') ||
+    s.includes('comida') ||
+    s.includes('pizzaria') ||
+    s.includes('lanchonete') ||
+    s.includes('hamburguer') ||
+    s.includes('bar') ||
+    s.includes('espetaria') ||
+    s.includes('delivery')
+  );
 }
 
 /**
@@ -249,7 +272,6 @@ export async function processNpsSurveys(supabase: ReturnType<typeof getServiceSu
   let checkedCount = 0;
 
   try {
-    // Busca todas as instâncias ativas e conectadas
     const { data: instances } = await supabase
       .from('xerb_instances')
       .select('tenant_id, instance_name, status')
@@ -263,29 +285,51 @@ export async function processNpsSurveys(supabase: ReturnType<typeof getServiceSu
       const tenantId = inst.tenant_id;
       if (!tenantId) continue;
 
-      const settings = await getReengagementSettings(tenantId);
+      const [tenantRes, settings] = await Promise.all([
+        supabase.from('xerb_tenants').select('name, segment').eq('id', tenantId).maybeSingle(),
+        getReengagementSettings(tenantId),
+      ]);
+
+      // NUNCA envia se o tenant não ativou explicitamente o NPS
       if (!settings.nps_enabled) continue;
 
+      const tenant = tenantRes.data;
       const queue = await getTenantNpsQueue(tenantId);
       const pendingItems = queue.filter((q) => q.status === 'pending');
       checkedCount += pendingItems.length;
 
       const delayMs = (settings.nps_delay_minutes || 40) * 60 * 1000;
+      const isFood = isRestaurantSegment(tenant?.segment);
 
       for (const item of pendingItems) {
         const deliveredMs = new Date(item.delivered_at).getTime();
-        // Dispara se passou o tempo mínimo de entrega (ex: 40 min) e não mais que 6 horas
         if (nowMs - deliveredMs >= delayMs && nowMs - deliveredMs <= 6 * 60 * 60 * 1000) {
-          const msg =
-            settings.nps_custom_message ||
-            [
+          let msg = settings.nps_custom_message;
+
+          if (msg) {
+            msg = msg
+              .replace(/\{cliente\}/gi, item.customer_name)
+              .replace(/\{empresa\}/gi, tenant?.name || 'nossa equipe')
+              .replace(/\{pedido\}/gi, item.display_id);
+          } else if (isFood) {
+            msg = [
               `Olá, *${item.customer_name}*! 🛵 Seu pedido *#${item.display_id}* foi entregue há pouco.`,
               '',
-              'De *1 a 5*, o que você achou da qualidade da comida e do tempo de entrega?',
+              'De *1 a 5*, o que você achou da sua experiência e do tempo de entrega?',
               '_(1 = Péssimo, 5 = Excelente)_',
               '',
               'Sua opinião sincera nos ajuda muito a melhorar! 🙏',
             ].join('\n');
+          } else {
+            msg = [
+              `Olá, *${item.customer_name}*! Tudo bem?`,
+              '',
+              `De *1 a 5*, como foi a sua experiência com o atendimento da *${tenant?.name || 'nossa empresa'}*?`,
+              '_(1 = Péssimo, 5 = Excelente)_',
+              '',
+              'Sua nota sincera nos ajuda a manter sempre o melhor padrão de qualidade! 🙏',
+            ].join('\n');
+          }
 
           const ok = await sendTextMessage(inst.instance_name, item.customer_phone, msg).catch(() => false);
           if (ok) {
@@ -296,7 +340,6 @@ export async function processNpsSurveys(supabase: ReturnType<typeof getServiceSu
             sentCount++;
           }
         } else if (nowMs - deliveredMs > 6 * 60 * 60 * 1000) {
-          // Expirou a janela de pesquisa
           await updateNpsQueueItem(tenantId, item.id, {
             status: 'dismissed',
           });
@@ -338,23 +381,20 @@ export async function processWeekendCampaigns(supabase: ReturnType<typeof getSer
       if (!tenantId) continue;
 
       const [tenantRes, settings] = await Promise.all([
-        supabase.from('xerb_tenants').select('name, phone').eq('id', tenantId).maybeSingle(),
+        supabase.from('xerb_tenants').select('name, phone, segment').eq('id', tenantId).maybeSingle(),
         getReengagementSettings(tenantId),
       ]);
 
       const tenant = tenantRes.data;
+      // CRÍTICO: Só executa se o tenant ativou explicitamente
       if (!tenant || !settings.weekend_campaign_enabled) continue;
 
       const targetDay = typeof settings.weekend_day === 'number' ? settings.weekend_day : 5;
       const targetHour = parseInt(settings.weekend_time?.split(':')[0] || '18', 10);
 
-      // Só executa no dia configurado (ex: sexta = 5) e a partir do horário configurado
       if (dayOfWeek !== targetDay || hour < targetHour) continue;
-
-      // Se já disparou hoje, ignora
       if (settings.weekend_last_sent_date === todayYmd) continue;
 
-      // Busca clientes com interações nos últimos 21 dias (3 semanas)
       const minDate = new Date(Date.now() - 21 * 24 * 60 * 60 * 1000).toISOString();
       const { data: recentLeads } = await supabase
         .from('xerb_leads')
@@ -373,30 +413,41 @@ export async function processWeekendCampaigns(supabase: ReturnType<typeof getSer
       }
 
       checkedCount += uniqueCustomers.size;
+      const isFood = isRestaurantSegment(tenant.segment);
 
-      // Dispara em lote seguro anti-ban (máx 20 por execução)
-      let count = 0;
       for (const [phone, name] of Array.from(uniqueCustomers.entries()).slice(0, 20)) {
-        const msg =
-          settings.weekend_custom_message ||
-          [
-            `Fala, *${name}*! Sextou no *${tenant.name}*! 🥩🍻`,
+        let msg = settings.weekend_custom_message;
+
+        if (msg) {
+          msg = msg
+            .replace(/\{cliente\}/gi, name)
+            .replace(/\{empresa\}/gi, tenant.name);
+        } else if (isFood) {
+          msg = [
+            `Fala, *${name}*! Sextou no *${tenant.name}*! 🍔🍻`,
             '',
-            'Hoje a nossa cozinha já está a todo vapor preparando nossos melhores pratos quentinhos e no capricho.',
+            'Hoje a nossa cozinha já está a todo vapor preparando pratos fresquinhos e no capricho.',
             '',
             'Bora garantir o seu jantar hoje sem fila? Só me mandar uma mensagem por aqui dizendo o que você vai querer! 👇',
           ].join('\n');
+        } else {
+          // Template genérico profissional para empresas de serviços, transporte, clínica, etc.
+          msg = [
+            `Olá, *${name}*! Tudo bem?`,
+            '',
+            `Passando para desejar um excelente final de semana em nome de toda a equipe da *${tenant.name}*!`,
+            '',
+            'Se precisar de qualquer atendimento, agendamento ou suporte, estamos sempre à disposição por aqui! 😊',
+          ].join('\n');
+        }
 
         const ok = await sendTextMessage(inst.instance_name, phone, msg).catch(() => false);
         if (ok) {
           sentCount++;
-          count++;
-          // Pausa respeitosa de 1.5s entre disparos
           await new Promise((r) => setTimeout(r, 1500));
         }
       }
 
-      // Salva marcação de data de disparo
       await saveReengagementSettings(tenantId, { weekend_last_sent_date: todayYmd });
     }
   } catch (err) {
@@ -407,7 +458,7 @@ export async function processWeekendCampaigns(supabase: ReturnType<typeof getSer
 }
 
 /**
- * Processador de Recuperação de Clientes Inativos (20+ dias sem pedir)
+ * Processador de Recuperação de Clientes Inativos (20+ dias sem pedir/interagir)
  */
 export async function processInactiveReengagement(supabase: ReturnType<typeof getServiceSupabase>): Promise<{
   checked: number;
@@ -431,11 +482,12 @@ export async function processInactiveReengagement(supabase: ReturnType<typeof ge
       if (!tenantId) continue;
 
       const [tenantRes, settings] = await Promise.all([
-        supabase.from('xerb_tenants').select('name, phone').eq('id', tenantId).maybeSingle(),
+        supabase.from('xerb_tenants').select('name, phone, segment').eq('id', tenantId).maybeSingle(),
         getReengagementSettings(tenantId),
       ]);
 
       const tenant = tenantRes.data;
+      // CRÍTICO: Só executa se o tenant ativou explicitamente
       if (!tenant || !settings.inactive_reengagement_enabled) continue;
 
       const thresholdDays = settings.inactive_threshold_days || 20;
@@ -445,7 +497,6 @@ export async function processInactiveReengagement(supabase: ReturnType<typeof ge
       const minDateIso = new Date(nowMs - maxInactiveMs).toISOString();
       const maxDateIso = new Date(nowMs - minInactiveMs).toISOString();
 
-      // Busca clientes com última atividade na faixa de inatividade
       const { data: inactives } = await supabase
         .from('xerb_leads')
         .select('id, customer_name, customer_phone, created_at, followup_sent_at')
@@ -457,20 +508,36 @@ export async function processInactiveReengagement(supabase: ReturnType<typeof ge
       if (!inactives?.length) continue;
 
       checkedCount += inactives.length;
+      const isFood = isRestaurantSegment(tenant.segment);
 
       for (const item of inactives) {
         const phone = normalizeBrPhone(item.customer_phone);
         if (!phone || phone === normalizeBrPhone(tenant.phone)) continue;
 
-        const msg =
-          settings.inactive_custom_message ||
-          [
-            `Oi, *${item.customer_name || 'amigo(a)'}*! Sentimos sua falta aqui no *${tenant.name}*! 😋`,
+        let msg = settings.inactive_custom_message;
+        const custName = item.customer_name || 'amigo(a)';
+
+        if (msg) {
+          msg = msg
+            .replace(/\{cliente\}/gi, custName)
+            .replace(/\{empresa\}/gi, tenant.name);
+        } else if (isFood) {
+          msg = [
+            `Oi, *${custName}*! Sentimos sua falta aqui no *${tenant.name}*! 😋`,
             '',
-            'Passando para lembrar que estamos com o cardápio atualizado e tudo preparado com o carinho de sempre.',
+            'Passando para lembrar que estamos com tudo preparado com o carinho de sempre.',
             '',
             'Que tal matar a saudade hoje? Só me dizer o que você vai querer que já agilizo para você! 🚀',
           ].join('\n');
+        } else {
+          msg = [
+            `Olá, *${custName}*! Tudo bem?`,
+            '',
+            `Passando para saber como você está e lembrar que a equipe da *${tenant.name}* está sempre à disposição para o que você precisar!`,
+            '',
+            'Se precisar de algo ou tiver alguma dúvida, é só me chamar por aqui. Tenha um ótimo dia!',
+          ].join('\n');
+        }
 
         const ok = await sendTextMessage(inst.instance_name, phone, msg).catch(() => false);
         if (ok) {

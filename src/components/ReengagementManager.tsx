@@ -33,15 +33,15 @@ export default function ReengagementManager({ tenantId }: ReengagementManagerPro
 
   // Formulário de Configurações
   const [settings, setSettings] = useState({
-    nps_enabled: true,
+    nps_enabled: false,
     nps_delay_minutes: 40,
     google_maps_url: '',
     nps_custom_message: '',
-    weekend_campaign_enabled: true,
+    weekend_campaign_enabled: false,
     weekend_day: 5, // 5 = Sexta-feira
     weekend_time: '18:00',
     weekend_custom_message: '',
-    inactive_reengagement_enabled: true,
+    inactive_reengagement_enabled: false,
     inactive_threshold_days: 20,
     inactive_custom_message: '',
   });
@@ -274,6 +274,22 @@ export default function ReengagementManager({ tenantId }: ReengagementManagerPro
                 </div>
               </div>
 
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Mensagem da Pesquisa de Satisfação (Opcional)
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="Deixe em branco para usar o padrão automático do seu segmento. Variáveis disponíveis: {cliente}, {empresa}, {pedido}"
+                  value={settings.nps_custom_message || ''}
+                  onChange={(e) => setSettings({ ...settings, nps_custom_message: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-emerald-500"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Use as tags <code className="text-emerald-400">{"{cliente}"}</code>, <code className="text-emerald-400">{"{empresa}"}</code> e <code className="text-emerald-400">{"{pedido}"}</code> para personalizar.
+                </p>
+              </div>
+
               {/* Como Funciona a Proteção de Reputação */}
               <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-4 text-xs space-y-2">
                 <div className="font-semibold text-slate-200 flex items-center gap-2">
@@ -359,15 +375,18 @@ export default function ReengagementManager({ tenantId }: ReengagementManagerPro
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Mensagem Customizada (Opcional)
+                  Mensagem Customizada do Fim de Semana (Opcional)
                 </label>
                 <textarea
                   rows={3}
-                  placeholder="Deixe em branco para usar o texto padrão humanizado do ERBots com o nome do cliente e da loja."
+                  placeholder="Deixe em branco para usar o texto padrão profissional do seu segmento. Variáveis: {cliente}, {empresa}"
                   value={settings.weekend_custom_message || ''}
                   onChange={(e) => setSettings({ ...settings, weekend_custom_message: e.target.value })}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-purple-500"
                 />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Use as tags <code className="text-purple-400">{"{cliente}"}</code> e <code className="text-purple-400">{"{empresa}"}</code> para personalizar com o nome da sua empresa e do cliente.
+                </p>
               </div>
             </div>
           )}
@@ -424,6 +443,22 @@ export default function ReengagementManager({ tenantId }: ReengagementManagerPro
                 </div>
                 <p className="text-[11px] text-slate-500 mt-1">
                   Se um cliente pediu no último mês e ficou 20 dias sem pedir nada, a IA manda uma mensagem acolhedora.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Mensagem de Recuperação Customizada (Opcional)
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="Deixe em branco para usar o padrão do seu segmento. Variáveis: {cliente}, {empresa}"
+                  value={settings.inactive_custom_message || ''}
+                  onChange={(e) => setSettings({ ...settings, inactive_custom_message: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-cyan-500"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Use as tags <code className="text-cyan-400">{"{cliente}"}</code> e <code className="text-cyan-400">{"{empresa}"}</code>.
                 </p>
               </div>
             </div>
