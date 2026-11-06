@@ -604,44 +604,6 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
               </div>
             </div>
 
-            {/* URL do Webhook da Saipos */}
-            <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-2">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <span className="text-xs font-bold text-white flex items-center gap-2">
-                  <Zap className="w-4 h-4 text-amber-400" />
-                  URL de Notificações / Webhook (Cole na Saipos)
-                </span>
-                <span className="text-[11px] text-slate-400">
-                  Recebe eventos em tempo real: <code className="text-emerald-400">CONFIRMED</code>, <code className="text-emerald-400">DISPATCHED</code>, <code className="text-emerald-400">DELIVERED</code>
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  readOnly
-                  value={webhookUrl}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 font-mono select-all"
-                />
-                <button
-                  type="button"
-                  onClick={() => copyToClipboard(webhookUrl, 'webhook')}
-                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 transition shrink-0 flex items-center gap-1.5"
-                >
-                  {copiedKey === 'webhook' ? (
-                    <>
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      <span className="text-emerald-400">Copiado</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5" />
-                      <span>Copiar</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-
             {/* Barra de Ações: Testar Conexão, Simular Pedido, Salvar */}
             <div className="pt-2 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800/80">
               <div className="flex flex-wrap items-center gap-2.5">

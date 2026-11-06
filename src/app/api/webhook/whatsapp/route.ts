@@ -925,7 +925,7 @@ export async function POST(req: NextRequest) {
     const { remoteJid, contactPhone: cleanPhone } = parseWhatsAppAddress(key, data);
 
     // Busca dados do tenant, bot_settings, knowledge_base e tabela de planos vigente
-    const [tenantRes, botSettingsRes, kbRes, plansCfg] = await Promise.all([
+    const [tenantRes, botSettingsRes, kbRes, plansCfg, saiposConfig] = await Promise.all([
       supabase
         .from('xerb_tenants')
         .select(
@@ -936,6 +936,7 @@ export async function POST(req: NextRequest) {
       supabase.from('xerb_bot_settings').select('*').eq('tenant_id', tenantId).maybeSingle(),
       supabase.from('xerb_knowledge_base').select('category, title, content').eq('tenant_id', tenantId).eq('is_active', true),
       getPlansConfig(),
+      getTenantIntegration(tenantId, 'saipos').catch(() => null),
     ]);
 
     const tenant = tenantRes.data;
@@ -1294,6 +1295,13 @@ export async function POST(req: NextRequest) {
       conversationHistory: history,
       incomingMessage: incomingBlock,
       customerName: pushName,
+      posIntegration: saiposConfig?.is_active
+        ? {
+            is_active: true,
+            provider: 'saipos',
+            auto_inject_orders: saiposConfig.settings?.auto_inject_orders !== false,
+          }
+        : undefined,
     });
 
     // 9.1 Registra o consumo (apenas respostas geradas pelo Gemini contam no limite do plano)
@@ -1400,6 +1408,114 @@ export async function POST(req: NextRequest) {
             notes: aiResult.capturedLead.notes,
           },
         });
+      }
+    }
+
+    // 11.1 Se a IA fechou um pedido estruturado e a Saipos estiver ativa, injeta no PDV
+    let orderInjectedSuccess = false;
+    if (aiResult.capturedOrder && saiposConfig?.is_active && saiposConfig?.settings?.auto_inject_orders !== false) {
+      try {
+        const orderData = aiResult.capturedOrder;
+        const totalItemsPrice = orderData.items.reduce(
+          (acc: number, it: any) => acc + (Number(it.unit_price || 0) * Number(it.quantity || 1)),
+          0
+        );
+        const finalTotal = totalItemsPrice > 0 ? totalItemsPrice : 25;
+
+        const saiposPayload: SaiposOrderPayload = {
+          order_type: orderData.order_type || 'DELIVERY',
+          customer: {
+            name: orderData.customer_name || pushName || conversation.contact_name || 'Cliente WhatsApp',
+            phone: orderData.customer_phone || cleanPhone || '5511999999999',
+          },
+          delivery_address: orderData.delivery_address
+            ? {
+                street: orderData.delivery_address.street || 'Rua Principal',
+                number: orderData.delivery_address.number || 'S/N',
+                complement: orderData.delivery_address.complement,
+                neighborhood: orderData.delivery_address.neighborhood || 'Centro',
+                city: orderData.delivery_address.city || 'São Paulo',
+                state: orderData.delivery_address.state || 'SP',
+                postal_code: orderData.delivery_address.postal_code,
+                reference: orderData.delivery_address.reference,
+              }
+            : {
+                street: 'Endereço informado na conversa',
+                number: 'S/N',
+                neighborhood: 'Centro',
+                city: 'São Paulo',
+                state: 'SP',
+              },
+          items: orderData.items.map((it: any, idx: number) => ({
+            id: it.id || String(idx + 1),
+            name: it.name,
+            quantity: Number(it.quantity) || 1,
+            unit_price: Number(it.unit_price) || (totalItemsPrice > 0 ? totalItemsPrice / orderData.items.length : 25),
+            total_price: Number(it.total_price) || (Number(it.unit_price || 25) * Number(it.quantity || 1)),
+            notes: it.notes || '',
+          })),
+          payments: [
+            {
+              type:
+                orderData.payment_method === 'DINHEIRO'
+                  ? 'DIN'
+                  : orderData.payment_method === 'DEBITO'
+                  ? 'DEB'
+                  : orderData.payment_method === 'CREDITO'
+                  ? 'CRE'
+                  : 'PIX',
+              value: finalTotal,
+              prepaid: orderData.payment_method === 'PIX',
+              change_for: Number(orderData.change_for) || 0,
+            },
+          ],
+          totals: {
+            items_price: finalTotal,
+            delivery_fee: 0,
+            discount: 0,
+            total: finalTotal,
+          },
+          notes: orderData.notes || 'Pedido fechado via Inteligência Artificial do ERBots',
+        };
+
+        const injectResult = await createSaiposOrder(saiposConfig.credentials, saiposPayload);
+        if (injectResult.success) {
+          orderInjectedSuccess = true;
+          const displayId = injectResult.display_id || (injectResult.external_order_id ? `#${injectResult.external_order_id}` : '');
+
+          const confirmOrderMsg = `👨‍🍳 *Pedido Confirmado e Transmitido para a Cozinha!* ${displayId ? `(Venda ${displayId})` : ''}\n\nJá estamos preparando seu pedido com todo o capricho! Assim que o entregador sair para a entrega, te aviso por aqui em tempo real. Muito obrigado pela preferência! ❤️🛵`;
+
+          await sendTextMessage(instanceName, remoteJid, confirmOrderMsg);
+          await insertMessage(supabase, {
+            conversation_id: conversation.id,
+            tenant_id: tenantId,
+            sender: 'ai',
+            content: confirmOrderMsg,
+          });
+
+          // Notifica o dono no WhatsApp
+          await notifyOwner({
+            instanceName,
+            tenant,
+            customerName: pushName || conversation.contact_name || '',
+            customerPhone: cleanPhone,
+            lastMessage: `🛵 NOVO PEDIDO SAIPOS: ${displayId}\nTotal: R$ ${finalTotal.toFixed(2)}\nItens: ${orderData.items.map((it: any) => `${it.quantity}x ${it.name}`).join(', ')}`,
+            handoff: false,
+            conversationId: conversation.id,
+          });
+
+          // Notifica CRM externo
+          dispatchOutboundWebhook(tenantId, 'lead.captured', {
+            contactPhone: cleanPhone,
+            contactName: pushName || conversation.contact_name || null,
+            leadData: {
+              interest: `Pedido Saipos ${displayId}`,
+              notes: `Total: R$ ${finalTotal.toFixed(2)} - ${orderData.items.map((it: any) => `${it.quantity}x ${it.name}`).join(', ')}`,
+            },
+          });
+        }
+      } catch (orderErr) {
+        console.error('[Webhook WhatsApp] Erro ao injetar pedido conversacional na Saipos:', orderErr);
       }
     }
 
