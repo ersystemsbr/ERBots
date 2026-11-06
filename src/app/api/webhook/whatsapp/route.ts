@@ -19,6 +19,7 @@ import { generateDailyPostForTenant } from '@/lib/ai/instagram-cron';
 import {
   getTenantIntegration,
   createSaiposOrder,
+  fetchSaiposCatalog,
   SaiposOrderPayload,
 } from '@/lib/integrations/saipos';
 
@@ -1416,11 +1417,94 @@ export async function POST(req: NextRequest) {
     if (aiResult.capturedOrder && saiposConfig?.is_active && saiposConfig?.settings?.auto_inject_orders !== false) {
       try {
         const orderData = aiResult.capturedOrder;
-        const totalItemsPrice = orderData.items.reduce(
+
+        // 1. Consulta o catálogo oficial da Saipos para fazer match de nomes, códigos e preços reais
+        let liveCatalog: any[] = [];
+        try {
+          const catRes = await fetchSaiposCatalog(saiposConfig.credentials);
+          if (catRes.success && Array.isArray(catRes.catalog)) {
+            liveCatalog = catRes.catalog;
+          }
+        } catch {}
+
+        function cleanCatalogToken(s: string) {
+          return (s || '')
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z0-9]+/g, ' ')
+            .trim();
+        }
+
+        function findMatchingItem(requestedName: string, requestedId?: string) {
+          if (!liveCatalog.length) return null;
+          if (requestedId) {
+            const byCode = liveCatalog.find(
+              (c) => String(c.codigo_saipos) === String(requestedId) || String(c.id_store_item) === String(requestedId)
+            );
+            if (byCode) return byCode;
+          }
+
+          const normReq = cleanCatalogToken(requestedName);
+          if (!normReq) return null;
+
+          // 1. Match exato
+          let found = liveCatalog.find((c) => cleanCatalogToken(c.item) === normReq);
+          if (found) return found;
+
+          // 2. Substring match
+          found = liveCatalog.find((c) => {
+            const normC = cleanCatalogToken(c.item);
+            return normC.includes(normReq) || normReq.includes(normC);
+          });
+          if (found) return found;
+
+          // 3. Match por tokens
+          const tokens = normReq.split(/\s+/).filter((t) => t.length >= 3);
+          if (tokens.length > 0) {
+            found = liveCatalog.find((c) => {
+              const normC = cleanCatalogToken(c.item);
+              return tokens.some((tok) => normC.includes(tok));
+            });
+            if (found) return found;
+          }
+
+          return null;
+        }
+
+        // Mapeia os itens vinculando com o cadastro real da Saipos
+        const resolvedItems = orderData.items.map((it: any, idx: number) => {
+          const matched = findMatchingItem(it.name, it.id);
+          const quantity = Math.max(1, Number(it.quantity) || 1);
+
+          if (matched) {
+            const unitPrice = Number(matched.price) || Number(it.unit_price) || 0;
+            return {
+              id: String(matched.codigo_saipos || matched.id_store_item || idx + 1),
+              name: String(matched.item || it.name),
+              quantity,
+              unit_price: unitPrice,
+              total_price: unitPrice * quantity,
+              notes: it.notes || '',
+            };
+          }
+
+          const unitPrice = Number(it.unit_price) || 0;
+          return {
+            id: it.id || String(idx + 1),
+            name: it.name,
+            quantity,
+            unit_price: unitPrice,
+            total_price: unitPrice * quantity,
+            notes: it.notes || '',
+          };
+        });
+
+        const totalItemsPrice = resolvedItems.reduce(
           (acc: number, it: any) => acc + (Number(it.unit_price || 0) * Number(it.quantity || 1)),
           0
         );
-        const finalTotal = totalItemsPrice > 0 ? totalItemsPrice : 25;
+        const finalTotal = totalItemsPrice > 0 ? totalItemsPrice : 0;
 
         const saiposPayload: SaiposOrderPayload = {
           order_type: orderData.order_type || 'DELIVERY',
@@ -1446,14 +1530,7 @@ export async function POST(req: NextRequest) {
                 city: 'São Paulo',
                 state: 'SP',
               },
-          items: orderData.items.map((it: any, idx: number) => ({
-            id: it.id || String(idx + 1),
-            name: it.name,
-            quantity: Number(it.quantity) || 1,
-            unit_price: Number(it.unit_price) || (totalItemsPrice > 0 ? totalItemsPrice / orderData.items.length : 25),
-            total_price: Number(it.total_price) || (Number(it.unit_price || 25) * Number(it.quantity || 1)),
-            notes: it.notes || '',
-          })),
+          items: resolvedItems,
           payments: [
             {
               type:
