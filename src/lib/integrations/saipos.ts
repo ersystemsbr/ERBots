@@ -98,7 +98,7 @@ export async function getSaiposPartnerSecret(): Promise<string> {
     console.warn('[Saipos getSaiposPartnerSecret] Erro ao buscar secret no banco:', err);
   }
 
-  return '633a9fe93b871eb424ed713264f5f514';
+  return '';
 }
 
 /**

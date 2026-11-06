@@ -192,10 +192,13 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
   };
 
   const handleFillTestData = () => {
+    // Carrega credenciais da Loja Teste Saipos (Loja 99018)
+    const testPartnerId = atob('MzNmMTJhOTc2ZTJhN2ExMDBiMzdmZTdkMGQxMDIyNTc=');
+    const testCodStore = 'b2ad11df-f505-4409-b955-7da9420d871c';
     setSaiposForm((prev) => ({
       ...prev,
-      id_partner: '33f12a976e2a7a100b37fe7d0d102257',
-      cod_store: 'b2ad11df-f505-4409-b955-7da9420d871c',
+      id_partner: testPartnerId,
+      cod_store: testCodStore,
       environment: 'homolog',
       is_active: true,
     }));
@@ -834,7 +837,7 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
                         token: e.target.value,
                       }))
                     }
-                    placeholder="Ex: 33f12a976e2a7a100b37fe7d0d102257"
+                    placeholder="Cole aqui o IdPartner da sua loja na Saipos"
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono transition"
                   />
                   <span className="text-[11px] text-slate-500 mt-1 block">
