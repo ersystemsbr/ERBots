@@ -10,6 +10,8 @@ import {
   SaiposCredentials,
   SaiposSettings,
 } from '@/lib/integrations/saipos';
+import { getIfoodIntegration, saveIfoodIntegration } from '@/lib/integrations/ifood';
+import { getGoogleBusinessConfig } from '@/lib/integrations/google-business';
 
 export async function GET(req: NextRequest) {
   try {
@@ -20,7 +22,11 @@ export async function GET(req: NextRequest) {
     if (!guard.ok) return guard.response;
 
     const tenantId = guard.tenant.id;
-    const saiposConfig = await getTenantIntegration(tenantId, 'saipos');
+    const [saiposConfig, ifoodConfig, googleConfig] = await Promise.all([
+      getTenantIntegration(tenantId, 'saipos'),
+      getIfoodIntegration(tenantId),
+      getGoogleBusinessConfig(tenantId),
+    ]);
 
     // Busca pedidos recentes no PDV se a tabela existir
     const supabase = getServiceSupabase();
@@ -39,10 +45,12 @@ export async function GET(req: NextRequest) {
       process.env.NEXT_PUBLIC_APP_URL ||
       (typeof window !== 'undefined' ? window.location.origin : 'https://www.erbots.com.br');
     const webhookUrl = `${appUrl}/api/webhook/saipos?tenant_id=${tenantId}`;
+    const ifoodWebhookUrl = `${appUrl}/api/webhook/ifood?tenant_id=${tenantId}`;
 
     return NextResponse.json({
       success: true,
       webhookUrl,
+      ifoodWebhookUrl,
       systems: [
         {
           id: 'saipos',
@@ -54,28 +62,22 @@ export async function GET(req: NextRequest) {
           config: saiposConfig,
         },
         {
-          id: 'gastrosys',
-          name: 'GastroSys (ER Systems)',
-          tagline: 'PDV gastronômico próprio da ER Systems com mesas, comandas e estoque unificado',
-          status: 'coming_soon',
-          is_available: false,
-          badge: 'Nativo da Casa (Em breve)',
-        },
-        {
           id: 'ifood',
           name: 'iFood / Open Delivery',
-          tagline: 'Padrão aberto oficial Open Delivery para sincronização com iFood e marketplaces',
-          status: 'coming_soon',
-          is_available: false,
-          badge: 'Em breve',
+          tagline: 'Padrão aberto oficial Open Delivery para sincronização com pedidos e status do iFood',
+          status: ifoodConfig.is_active ? 'active' : 'available',
+          is_available: true,
+          badge: ifoodConfig.is_active ? 'Conectado & Ativo' : 'Disponível',
+          config: ifoodConfig,
         },
         {
-          id: 'anota_ai',
-          name: 'Anota AI / Cardápio Web',
-          tagline: 'Sincronização com cardápio digital web e pedidos online',
-          status: 'coming_soon',
-          is_available: false,
-          badge: 'Em breve',
+          id: 'google_business',
+          name: 'Google Meu Negócio',
+          tagline: 'Monitoramento de avaliações do Google Maps com respostas automáticas humanizadas por IA',
+          status: googleConfig.is_active ? 'active' : 'available',
+          is_available: true,
+          badge: googleConfig.is_active ? 'Conectado & Ativo' : 'Disponível',
+          config: googleConfig,
         },
       ],
       recentOrders,
@@ -204,7 +206,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(syncResult);
     }
 
-    // Ação Padrão: Salvar configurações
+    if (provider === 'ifood') {
+      const saved = await saveIfoodIntegration(tenantId, {
+        client_id: (credentials?.client_id || '').trim(),
+        client_secret: (credentials?.client_secret || '').trim(),
+        merchant_id: (credentials?.merchant_id || '').trim(),
+        is_active: Boolean(is_active),
+        notify_customer_whatsapp: settings?.notify_customer_whatsapp !== false,
+      });
+      return NextResponse.json({
+        success: saved,
+        message: saved ? 'Configurações do iFood / Open Delivery salvas com sucesso!' : 'Erro ao salvar iFood.',
+      });
+    }
+
+    // Ação Padrão: Salvar configurações Saipos
     const idPartner = (credentials?.id_partner || credentials?.token || '').trim();
     const codStore = (credentials?.cod_store || credentials?.store_id || '').trim();
 

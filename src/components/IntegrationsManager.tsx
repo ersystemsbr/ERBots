@@ -22,6 +22,10 @@ import {
   Database,
   Code,
   BookOpen,
+  Flame,
+  MapPin,
+  Sparkles,
+  Save,
 } from 'lucide-react';
 
 interface IntegrationsManagerProps {
@@ -44,6 +48,7 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
   const [systems, setSystems] = useState<PosSystem[]>([]);
   const [recentOrders, setRecentOrders] = useState<any[]>([]);
   const [webhookUrl, setWebhookUrl] = useState('');
+  const [ifoodWebhookUrl, setIfoodWebhookUrl] = useState('');
   const [selectedSystem, setSelectedSystem] = useState<string>('saipos');
 
   // Formulário Saipos
@@ -58,6 +63,26 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
     notify_customer_whatsapp: true,
     default_payment: 'PIX' as 'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD' | 'CASH',
   });
+
+  // Formulário iFood
+  const [ifoodForm, setIfoodForm] = useState({
+    client_id: '',
+    client_secret: '',
+    merchant_id: '',
+    is_active: false,
+    notify_customer_whatsapp: true,
+  });
+
+  // Formulário Google Meu Negócio
+  const [googleForm, setGoogleForm] = useState({
+    place_id: '',
+    maps_review_url: '',
+    is_active: false,
+    auto_reply_5_star: true,
+    alert_owner_low_rating: true,
+  });
+  const [testingGoogleAi, setTestingGoogleAi] = useState(false);
+  const [sampleAiReply, setSampleAiReply] = useState<string | null>(null);
 
   // Estados de ação
   const [testingConnection, setTestingConnection] = useState(false);
@@ -76,6 +101,7 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
         setSystems(data.systems || []);
         setRecentOrders(data.recentOrders || []);
         setWebhookUrl(data.webhookUrl || '');
+        setIfoodWebhookUrl(data.ifoodWebhookUrl || '');
 
         const saiposSys = (data.systems || []).find((s: any) => s.id === 'saipos');
         if (saiposSys?.config) {
@@ -92,6 +118,30 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
             auto_inject_orders: cfg.settings?.auto_inject_orders !== false,
             notify_customer_whatsapp: cfg.settings?.notify_customer_whatsapp !== false,
             default_payment: cfg.settings?.default_payment || 'PIX',
+          });
+        }
+
+        const ifoodSys = (data.systems || []).find((s: any) => s.id === 'ifood');
+        if (ifoodSys?.config) {
+          const cfg = ifoodSys.config;
+          setIfoodForm({
+            client_id: cfg.client_id || '',
+            client_secret: cfg.client_secret || '',
+            merchant_id: cfg.merchant_id || '',
+            is_active: Boolean(cfg.is_active),
+            notify_customer_whatsapp: cfg.notify_customer_whatsapp !== false,
+          });
+        }
+
+        const googleSys = (data.systems || []).find((s: any) => s.id === 'google_business');
+        if (googleSys?.config) {
+          const cfg = googleSys.config;
+          setGoogleForm({
+            place_id: cfg.place_id || '',
+            maps_review_url: cfg.maps_review_url || '',
+            is_active: Boolean(cfg.is_active),
+            auto_reply_5_star: cfg.auto_reply_5_star !== false,
+            alert_owner_low_rating: cfg.alert_owner_low_rating !== false,
           });
         }
       }
@@ -290,6 +340,95 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
       setFeedbackMsg({ type: 'error', text: 'Erro ao conectar para sincronizar o cardápio.' });
     } finally {
       setSyncingMenu(false);
+    }
+  };
+
+  const handleSaveIfood = async () => {
+    try {
+      setSavingSettings(true);
+      setFeedbackMsg(null);
+      const res = await authFetch('/api/tenant/integrations/pos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          provider: 'ifood',
+          is_active: ifoodForm.is_active,
+          credentials: {
+            client_id: ifoodForm.client_id,
+            client_secret: ifoodForm.client_secret,
+            merchant_id: ifoodForm.merchant_id,
+          },
+          settings: {
+            notify_customer_whatsapp: ifoodForm.notify_customer_whatsapp,
+          },
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setFeedbackMsg({ type: 'success', text: 'Configurações do iFood / Open Delivery salvas com sucesso!' });
+        loadData();
+      } else {
+        setFeedbackMsg({ type: 'error', text: data.error || 'Erro ao salvar configurações do iFood.' });
+      }
+    } catch (err: any) {
+      setFeedbackMsg({ type: 'error', text: err?.message || 'Erro ao salvar.' });
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const handleSaveGoogle = async () => {
+    try {
+      setSavingSettings(true);
+      setFeedbackMsg(null);
+      const res = await authFetch('/api/tenant/integrations/google-business', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          settings: googleForm,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setFeedbackMsg({ type: 'success', text: 'Configurações do Google Meu Negócio salvas com sucesso!' });
+        loadData();
+      } else {
+        setFeedbackMsg({ type: 'error', text: data.error || 'Erro ao salvar Google Meu Negócio.' });
+      }
+    } catch (err: any) {
+      setFeedbackMsg({ type: 'error', text: err?.message || 'Erro ao salvar.' });
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const handleTestGoogleReply = async () => {
+    try {
+      setTestingGoogleAi(true);
+      setSampleAiReply(null);
+      const res = await authFetch('/api/tenant/integrations/google-business', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          action: 'test_ai_reply',
+          sampleReview: {
+            author: 'Mariana Silva',
+            rating: 5,
+            comment: 'Melhor espetinho da cidade! O chopp estava trincando de gelado e o atendimento nota 10.',
+          },
+        }),
+      });
+      const data = await res.json();
+      if (data.reply) {
+        setSampleAiReply(data.reply);
+      }
+    } catch (err) {
+      console.warn('Erro ao testar IA do Google:', err);
+    } finally {
+      setTestingGoogleAi(false);
     }
   };
 
@@ -778,8 +917,294 @@ export default function IntegrationsManager({ tenantId, isSuperAdmin }: Integrat
         </div>
       )}
 
-      {/* Outros Sistemas: GastroSys, iFood, Anota AI */}
-      {selectedSystem !== 'saipos' && (
+      {/* Painel do Sistema: iFood / Open Delivery */}
+      {selectedSystem === 'ifood' && (
+        <div className="space-y-6 animate-in fade-in duration-300">
+          <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 sm:p-7 space-y-6 shadow-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-red-500 to-rose-700 flex items-center justify-center text-white font-extrabold text-xl shadow-lg shadow-red-500/20">
+                  <Utensils className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg font-bold text-white">iFood & Open Delivery</h3>
+                    <span
+                      className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
+                        ifoodForm.is_active
+                          ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                          : 'bg-slate-800 border-slate-700 text-slate-400'
+                      }`}
+                    >
+                      {ifoodForm.is_active ? 'Conectado & Ativo' : 'Pendente de Configuração'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Padrão aberto oficial para sincronização de pedidos e status do iFood.
+                  </p>
+                </div>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={ifoodForm.is_active}
+                  onChange={(e) => setIfoodForm({ ...ifoodForm, is_active: e.target.checked })}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-500"></div>
+              </label>
+            </div>
+
+            <div className="space-y-4">
+              <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-red-400" />
+                Credenciais da Loja no iFood Developer
+              </h4>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Merchant ID (ID da Loja no iFood)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ex: c7891...-4b92-..."
+                    value={ifoodForm.merchant_id}
+                    onChange={(e) => setIfoodForm({ ...ifoodForm, merchant_id: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-red-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Client ID (Portal Desenvolvedor)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ex: client-id-..."
+                    value={ifoodForm.client_id}
+                    onChange={(e) => setIfoodForm({ ...ifoodForm, client_id: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-red-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Client Secret
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="••••••••••••••••"
+                    value={ifoodForm.client_secret}
+                    onChange={(e) => setIfoodForm({ ...ifoodForm, client_secret: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-red-500"
+                  />
+                </div>
+              </div>
+
+              {/* URL do Webhook do iFood */}
+              {ifoodWebhookUrl && (
+                <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800/80 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-300 flex items-center gap-2">
+                      <Zap className="w-3.5 h-3.5 text-red-400" />
+                      URL de Webhook para Eventos do iFood
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(ifoodWebhookUrl, 'ifood-webhook')}
+                      className="text-xs text-slate-400 hover:text-white flex items-center gap-1"
+                    >
+                      {copiedKey === 'ifood-webhook' ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <span className="text-emerald-400">Copiado</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copiar URL</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <p className="text-[11px] font-mono text-slate-400 break-all bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">
+                    {ifoodWebhookUrl}
+                  </p>
+                </div>
+              )}
+
+              {/* Regra de Reengajamento para iFood */}
+              <div className="p-4 rounded-2xl bg-red-950/20 border border-red-500/20 flex items-start gap-3">
+                <Flame className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                <div className="text-xs space-y-1">
+                  <p className="font-bold text-red-300">
+                    Transforme Clientes do iFood em Clientes Recorrentes Diretos
+                  </p>
+                  <p className="text-slate-400 leading-relaxed">
+                    Quando o motoboy do iFood entregar o pedido, o ERBots aciona a pesquisa de NPS no WhatsApp do cliente. Se a nota for 5, a IA convida o cliente a pedir direto pelo seu WhatsApp na próxima vez, economizando até 27% de taxas!
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={handleSaveIfood}
+                  disabled={savingSettings}
+                  className="flex items-center gap-2 px-6 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl shadow-lg transition active:scale-95 disabled:opacity-50"
+                >
+                  {savingSettings ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                  Salvar Configurações do iFood
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Painel do Sistema: Google Meu Negócio */}
+      {selectedSystem === 'google_business' && (
+        <div className="space-y-6 animate-in fade-in duration-300">
+          <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 sm:p-7 space-y-6 shadow-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-700 flex items-center justify-center text-white font-extrabold text-xl shadow-lg shadow-blue-500/20">
+                  <MapPin className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg font-bold text-white">Google Meu Negócio</h3>
+                    <span
+                      className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
+                        googleForm.is_active
+                          ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                          : 'bg-slate-800 border-slate-700 text-slate-400'
+                      }`}
+                    >
+                      {googleForm.is_active ? 'Conectado & Ativo' : 'Disponível'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Monitoramento e respostas automáticas inteligentes por IA para avaliações no Google Maps.
+                  </p>
+                </div>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={googleForm.is_active}
+                  onChange={(e) => setGoogleForm({ ...googleForm, is_active: e.target.checked })}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+              </label>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Link da Ficha ou URL de Avaliações do Google Maps
+                </label>
+                <input
+                  type="url"
+                  placeholder="https://g.page/r/... ou link de receber mais avaliações da sua ficha"
+                  value={googleForm.maps_review_url}
+                  onChange={(e) => setGoogleForm({ ...googleForm, maps_review_url: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Este link também é enviado automaticamente na pesquisa de satisfação do WhatsApp para quem dá nota 5!
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                <label className="flex items-start gap-3 p-3.5 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition">
+                  <input
+                    type="checkbox"
+                    checked={googleForm.auto_reply_5_star}
+                    onChange={(e) => setGoogleForm({ ...googleForm, auto_reply_5_star: e.target.checked })}
+                    className="mt-0.5 rounded border-slate-700 text-blue-500 focus:ring-0"
+                  />
+                  <div>
+                    <span className="text-xs font-bold text-white block">
+                      Respostas Automáticas com IA para Notas 4 e 5
+                    </span>
+                    <span className="text-[11px] text-slate-400">
+                      A IA responde elogios em minutos com mensagens calorosas, agradecendo e citando o nome do cliente.
+                    </span>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-3 p-3.5 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition">
+                  <input
+                    type="checkbox"
+                    checked={googleForm.alert_owner_low_rating}
+                    onChange={(e) =>
+                      setGoogleForm({ ...googleForm, alert_owner_low_rating: e.target.checked })
+                    }
+                    className="mt-0.5 rounded border-slate-700 text-amber-500 focus:ring-0"
+                  />
+                  <div>
+                    <span className="text-xs font-bold text-white block">
+                      Alerta no WhatsApp do Dono para Notas Baixas
+                    </span>
+                    <span className="text-[11px] text-slate-400">
+                      Dispara notificação imediata se alguém der nota 1, 2 ou 3 para intervir rapidamente.
+                    </span>
+                  </div>
+                </label>
+              </div>
+
+              {/* Teste da IA do Google */}
+              <div className="p-4 bg-slate-950/70 border border-slate-800 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-300 flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-blue-400" />
+                    Simular Resposta Humanizada com IA
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleTestGoogleReply}
+                    disabled={testingGoogleAi}
+                    className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-300 font-semibold text-[11px] rounded-lg transition flex items-center gap-1.5"
+                  >
+                    {testingGoogleAi ? (
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Sparkles className="w-3 h-3" />
+                    )}
+                    Gerar Resposta Exemplo
+                  </button>
+                </div>
+
+                {sampleAiReply && (
+                  <div className="p-3 bg-slate-900 border border-blue-500/30 rounded-xl text-xs text-blue-100 font-medium leading-relaxed">
+                    "{sampleAiReply}"
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={handleSaveGoogle}
+                  disabled={savingSettings}
+                  className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-lg transition active:scale-95 disabled:opacity-50"
+                >
+                  {savingSettings ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                  Salvar Configurações do Google
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Outros Sistemas: Fallback genérico */}
+      {selectedSystem !== 'saipos' && selectedSystem !== 'ifood' && selectedSystem !== 'google_business' && (
         <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-7 text-center space-y-4 shadow-xl">
           <div className="w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 mx-auto flex items-center justify-center text-slate-300">
             <Database className="w-7 h-7 text-emerald-400" />

@@ -10,6 +10,11 @@ import { getAddonsConfig, getPlansConfig } from '@/lib/billing/plans-config';
 import { formatBRL } from '@/lib/plans';
 import { logSystemEvent } from '@/lib/monitoring';
 import { runInstagramDailyCron } from '@/lib/ai/instagram-cron';
+import {
+  processNpsSurveys,
+  processWeekendCampaigns,
+  processInactiveReengagement,
+} from '@/lib/reengagement';
 
 export const maxDuration = 60;
 
@@ -352,19 +357,37 @@ async function handleCron(req: NextRequest) {
     }
 
     const brtMins = currentBrtMinutes();
-    // Janela respeitosa de envio no Brasil: 08:30 às 20:30 (Horário de Brasília)
-    if (brtMins < 8 * 60 + 30 || brtMins > 20 * 60 + 30) {
+    // Janela geral de atendimento e entrega no Brasil: 08:30 às 23:30 (Horário de Brasília)
+    if (brtMins < 8 * 60 + 30 || brtMins > 23 * 60 + 30) {
       return NextResponse.json({
         success: true,
         skipped: true,
-        reason: 'outside_commercial_window_brt',
+        reason: 'outside_service_window_brt',
       });
     }
 
     const supabase = getServiceSupabase();
-    const [followups, trialNudges] = await Promise.all([
-      processLeadFollowups(supabase),
-      processTrialNudges(supabase),
+
+    // Apenas mensagens comerciais/trial respeitam o teto das 20:30
+    const isCommercialWindow = brtMins <= 20 * 60 + 30;
+
+    let followups = { checked: 0, sent: 0 };
+    let trialNudges = { checked: 0, sent: 0 };
+
+    if (isCommercialWindow) {
+      const [fRes, tRes] = await Promise.all([
+        processLeadFollowups(supabase),
+        processTrialNudges(supabase),
+      ]);
+      followups = fRes;
+      trialNudges = tRes;
+    }
+
+    // NPS, Vendas Ativas e Reengajamento (roda até às 23:30 para entregas noturnas)
+    const [npsRes, weekendRes, inactiveRes] = await Promise.all([
+      processNpsSurveys(supabase),
+      processWeekendCampaigns(supabase),
+      isCommercialWindow ? processInactiveReengagement(supabase) : Promise.resolve({ checked: 0, sent: 0 }),
     ]);
 
     let instagramCron = { checked: 0, generated: 0 };
@@ -374,12 +397,15 @@ async function handleCron(req: NextRequest) {
       console.warn('[Cron Automations] Falha ao executar rotina diária de Instagram:', igErr);
     }
 
-    if (followups.sent > 0 || trialNudges.sent > 0 || instagramCron.generated > 0) {
+    const totalSent =
+      followups.sent + trialNudges.sent + npsRes.sent + weekendRes.sent + inactiveRes.sent;
+
+    if (totalSent > 0 || instagramCron.generated > 0) {
       await logSystemEvent({
         level: 'info',
         source: 'cron.automations',
-        message: `Automações executadas: ${followups.sent} follow-up(s), ${trialNudges.sent} aviso(s) de trial e ${instagramCron.generated} post(s) de Instagram criados.`,
-        metadata: { followups, trialNudges, instagramCron },
+        message: `Automações executadas: ${followups.sent} follow-up(s), ${npsRes.sent} NPS, ${weekendRes.sent} Sextou, ${inactiveRes.sent} reengajamento(s), ${trialNudges.sent} aviso(s) trial e ${instagramCron.generated} post(s) Instagram.`,
+        metadata: { followups, trialNudges, npsRes, weekendRes, inactiveRes, instagramCron },
       });
     }
 
@@ -387,6 +413,9 @@ async function handleCron(req: NextRequest) {
       success: true,
       followups,
       trialNudges,
+      nps: npsRes,
+      weekendCampaign: weekendRes,
+      inactiveReengagement: inactiveRes,
       instagramCron,
     });
   } catch (err: any) {

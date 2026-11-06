@@ -6,6 +6,7 @@ import {
   sendOrderStatusWhatsAppNotification,
   getTenantIntegration,
 } from '@/lib/integrations/saipos';
+import { scheduleOrderNps } from '@/lib/reengagement';
 
 export async function POST(req: NextRequest) {
   try {
@@ -63,6 +64,15 @@ export async function POST(req: NextRequest) {
     if (shouldNotify && customerPhone) {
       const message = generateStatusWhatsAppMessage(status, customerName, displayId, { reason });
       notifiedWhatsApp = await sendOrderStatusWhatsAppNotification(tenantId, customerPhone, message);
+    }
+
+    // 3. Se o pedido foi entregue (DELIVERED), agenda pesquisa de satisfação (NPS pós-entrega)
+    if (status === 'DELIVERED' && customerPhone) {
+      scheduleOrderNps(tenantId, {
+        displayId: displayId || externalOrderId || 'Recente',
+        customerName,
+        customerPhone,
+      }).catch((npsErr) => console.warn('[Webhook Saipos] Erro ao agendar NPS pós-entrega:', npsErr));
     }
 
     return NextResponse.json({

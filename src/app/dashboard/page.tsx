@@ -13,10 +13,11 @@ import AnalyticsDashboard from '@/components/AnalyticsDashboard';
 import ErSystemsAppsDashboard from '@/components/ErSystemsAppsDashboard';
 import InstagramAgentManager, { InstagramIcon } from '@/components/InstagramAgentManager';
 import IntegrationsManager from '@/components/IntegrationsManager';
+import ReengagementManager from '@/components/ReengagementManager';
 import { supabase } from '@/lib/supabase';
 import { authFetch } from '@/lib/api-client';
 import { getAccessState } from '@/lib/plans';
-import { Loader2, WifiOff, Bot, Sparkles, BookOpen, ShieldCheck, Building2, Layers } from 'lucide-react';
+import { Loader2, WifiOff, Bot, Sparkles, BookOpen, ShieldCheck, Building2, Layers, Flame } from 'lucide-react';
 
 interface InstanceSnapshot {
   status: string;
@@ -38,6 +39,7 @@ export default function DashboardPage() {
   const settingsTabs = [
     { id: 'whatsapp', label: 'Configurações WhatsApp', icon: Bot },
     { id: 'instagram', label: 'Configurações Instagram', icon: InstagramIcon },
+    { id: 'reengagement', label: 'Vendas Ativas & NPS', icon: Flame },
     { id: 'integrations', label: 'Integrações (PDV/ERP)', icon: Layers },
     { id: 'plans', label: 'Planos & Assinaturas', icon: ShieldCheck },
     { id: 'profile', label: 'Dados da Empresa', icon: Building2 },
@@ -58,7 +60,7 @@ export default function DashboardPage() {
       setCurrentTab('settings');
       setSettingsSubTab('whatsapp');
       setWaActiveCard('knowledge');
-    } else if (['integrations', 'plans', 'profile'].includes(tab)) {
+    } else if (['reengagement', 'integrations', 'plans', 'profile'].includes(tab)) {
       setCurrentTab('settings');
       setSettingsSubTab(tab);
     } else {
@@ -414,6 +416,11 @@ export default function DashboardPage() {
               {/* SUB-ABA: Configurações Instagram (Cards de Voz da Marca & Meta Graph API) */}
               {settingsSubTab === 'instagram' && (
                 <InstagramAgentManager onlySettings={true} />
+              )}
+
+              {/* SUB-ABA: Vendas Ativas & NPS */}
+              {settingsSubTab === 'reengagement' && (
+                <ReengagementManager tenantId={tenantId} />
               )}
 
               {/* SUB-ABA: Integrações */}

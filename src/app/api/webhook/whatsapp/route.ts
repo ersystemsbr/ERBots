@@ -22,6 +22,11 @@ import {
   fetchSaiposCatalog,
   SaiposOrderPayload,
 } from '@/lib/integrations/saipos';
+import {
+  getPendingNpsResponseForPhone,
+  updateNpsQueueItem,
+  getReengagementSettings,
+} from '@/lib/reengagement';
 
 export const maxDuration = 60;
 
@@ -1285,6 +1290,83 @@ export async function POST(req: NextRequest) {
         .slice(i, i + 10)
         .reverse()
         .map((m: any) => ({ sender: m.sender as 'user' | 'ai' | 'human', content: m.content }));
+    }
+
+    // 8.1 Interceptador de Resposta de NPS (Pesquisa de Satisfação Pós-Entrega)
+    const pendingNps = await getPendingNpsResponseForPhone(tenantId, cleanPhone).catch(() => null);
+    if (pendingNps) {
+      const matchScore = incomingBlock.match(/\b([1-5])\b/);
+      let parsedRating: number | null = null;
+      if (matchScore) {
+        parsedRating = parseInt(matchScore[1], 10);
+      } else {
+        const lower = incomingBlock.toLowerCase();
+        if (/excelente|otimo|ótimo|maravilh|perfeito|muito bom|nota 10|amei|top/.test(lower)) parsedRating = 5;
+        else if (/horrivel|horrível|pessimo|péssimo|frio|atrasou|ruim|estragado/.test(lower)) parsedRating = 1;
+      }
+
+      if (parsedRating !== null) {
+        await updateNpsQueueItem(tenantId, pendingNps.id, {
+          rating: parsedRating,
+          status: 'responded',
+          responded_at: new Date().toISOString(),
+        });
+
+        if (parsedRating >= 4) {
+          const reSettings = await getReengagementSettings(tenantId);
+          const mapsUrl = reSettings.google_maps_url?.trim() || '';
+
+          let npsReply = `Ficamos muito felizes que você tenha gostado da experiência! ⭐⭐⭐⭐⭐`;
+          if (mapsUrl) {
+            npsReply += `\n\nSe você puder deixar essa mesma avaliação no nosso perfil do Google, você nos ajuda imensamente a crescer e continuar servindo o melhor:\n👉 ${mapsUrl}`;
+          }
+          npsReply += `\n\nMuito obrigado pela preferência e conte sempre com a gente!`;
+
+          const aiMsgId = await insertMessage(supabase, {
+            conversation_id: conversation.id,
+            tenant_id: tenantId,
+            sender: 'ai',
+            content: npsReply,
+          });
+          const sent = await sendTextMessage(instanceName, remoteJid, npsReply);
+          if (!sent && aiMsgId && aiMsgId !== 'DUPLICATE') {
+            await supabase.from('xerb_messages').delete().eq('id', aiMsgId);
+          }
+          return NextResponse.json({ success: true, replied: sent, npsHandled: true, rating: parsedRating });
+        } else {
+          // Nota 1, 2 ou 3: Acolhe o cliente e alerta o lojista com URGÊNCIA no WhatsApp
+          const npsReply = `Sentimos muito que sua experiência não tenha sido 100% perfeita. 😔 Nosso compromisso é servir com a máxima qualidade e agilidade.\n\nJá notifiquei a gerência do restaurante com prioridade para entendermos o que houve e te dar uma atenção especial!`;
+
+          const aiMsgId = await insertMessage(supabase, {
+            conversation_id: conversation.id,
+            tenant_id: tenantId,
+            sender: 'ai',
+            content: npsReply,
+          });
+          const sent = await sendTextMessage(instanceName, remoteJid, npsReply);
+          if (!sent && aiMsgId && aiMsgId !== 'DUPLICATE') {
+            await supabase.from('xerb_messages').delete().eq('id', aiMsgId);
+          }
+
+          // Alerta imediato ao dono
+          await notifyOwner({
+            instanceName,
+            tenant,
+            customerName: pushName || conversation.contact_name || cleanPhone,
+            customerPhone: cleanPhone,
+            lastMessage: `🚨 *ALERTA URGENTE DE SATISFAÇÃO (NPS)*\nCliente avaliou com nota *${parsedRating}/5* o pedido *#${pendingNps.display_id}*.\nFeedback: "${incomingBlock}"\n\n⚠️ Ligue imediatamente para o cliente para reverter a insatisfação e resolver o ocorrido!`,
+            handoff: true,
+            conversationId: conversation.id,
+          });
+
+          await supabase
+            .from('xerb_conversations')
+            .update({ handling_status: 'HUMAN', updated_at: new Date().toISOString() })
+            .eq('id', conversation.id);
+
+          return NextResponse.json({ success: true, replied: sent, npsHandled: true, rating: parsedRating, alertedOwner: true });
+        }
+      }
     }
 
     // 9. Processa a resposta com o motor de IA do ERBots
